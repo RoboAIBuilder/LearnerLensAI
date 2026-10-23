@@ -1,6 +1,6 @@
 // Learner Lens service worker: the app opens instantly and works offline.
 // Data (/api) always goes to the network, so nothing stale is ever shown as saved.
-const VERSION = "6026693c2edb";
+const VERSION = "2c877aec025a";
 const SHELL = `ll-shell-${VERSION}`;
 const FONTS = "ll-fonts-v1";
 const SHELL_FILES = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png", "/icons/favicon-32.png"];

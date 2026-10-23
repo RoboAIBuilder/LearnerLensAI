@@ -1,0 +1,919 @@
+{
+ "note": "Mock 8th grade class. All students are fictional.",
+ "roster": [
+  {
+   "id": "maya",
+   "name": "Maya Adams"
+  },
+  {
+   "id": "ethan",
+   "name": "Ethan Brooks"
+  },
+  {
+   "id": "lily",
+   "name": "Lily Chen"
+  },
+  {
+   "id": "mateo",
+   "name": "Mateo Diaz"
+  },
+  {
+   "id": "noah",
+   "name": "Noah Evans"
+  },
+  {
+   "id": "ava",
+   "name": "Ava Fischer"
+  },
+  {
+   "id": "arjun",
+   "name": "Arjun Gupta"
+  },
+  {
+   "id": "zoe",
+   "name": "Zoe Harris"
+  },
+  {
+   "id": "kenji",
+   "name": "Kenji Ito"
+  },
+  {
+   "id": "olivia",
+   "name": "Olivia Johnson"
+  }
+ ],
+ "gradebook": [
+  {
+   "id": "alg-1",
+   "subject": "Algebra I",
+   "name": "Quiz 1: Multi-step Equations",
+   "date": "2026-09-14",
+   "points": 20,
+   "skill": "Multi-step equations",
+   "scores": {
+    "maya": 18,
+    "ethan": 9,
+    "lily": 17,
+    "mateo": 11,
+    "noah": 20,
+    "ava": 8,
+    "arjun": 15,
+    "zoe": 10,
+    "kenji": 12,
+    "olivia": 16
+   }
+  },
+  {
+   "id": "alg-2",
+   "subject": "Algebra I",
+   "name": "Quiz 2: Literal Equations",
+   "date": "2026-09-21",
+   "points": 20,
+   "skill": "Literal equations",
+   "scores": {
+    "maya": 19,
+    "ethan": 14,
+    "lily": 18,
+    "mateo": 16,
+    "noah": 19,
+    "ava": 11,
+    "arjun": 17,
+    "zoe": 18,
+    "kenji": 13,
+    "olivia": 17
+   }
+  },
+  {
+   "id": "alg-3",
+   "subject": "Algebra I",
+   "name": "Homework: Inequalities",
+   "date": "2026-09-28",
+   "points": 10,
+   "skill": "Inequalities",
+   "scores": {
+    "maya": 10,
+    "ethan": 6,
+    "lily": 9,
+    "mateo": null,
+    "noah": 10,
+    "ava": 5,
+    "arjun": 8,
+    "zoe": 9,
+    "kenji": 7,
+    "olivia": 10
+   }
+  },
+  {
+   "id": "alg-4",
+   "subject": "Algebra I",
+   "name": "Unit 1 Test: Equations & Inequalities",
+   "date": "2026-10-05",
+   "points": 100,
+   "skill": "Equations & inequalities",
+   "scores": {
+    "maya": 92,
+    "ethan": 61,
+    "lily": 87,
+    "mateo": 70,
+    "noah": 96,
+    "ava": 55,
+    "arjun": 82,
+    "zoe": 76,
+    "kenji": 66,
+    "olivia": 84
+   }
+  },
+  {
+   "id": "alg-5",
+   "subject": "Algebra I",
+   "name": "Project: Budget Equations",
+   "date": "2026-10-12",
+   "points": 50,
+   "skill": "Applying equations",
+   "scores": {
+    "maya": 46,
+    "ethan": 38,
+    "lily": 44,
+    "mateo": 40,
+    "noah": 48,
+    "ava": null,
+    "arjun": 43,
+    "zoe": 42,
+    "kenji": 37,
+    "olivia": 45
+   }
+  },
+  {
+   "id": "sci-1",
+   "subject": "Science",
+   "name": "Quiz 1: Speed & Velocity",
+   "date": "2026-09-11",
+   "points": 20,
+   "skill": "Speed & velocity",
+   "scores": {
+    "maya": 17,
+    "ethan": 15,
+    "lily": 19,
+    "mateo": 13,
+    "noah": 18,
+    "ava": 10,
+    "arjun": 16,
+    "zoe": 14,
+    "kenji": 11,
+    "olivia": 17
+   }
+  },
+  {
+   "id": "sci-2",
+   "subject": "Science",
+   "name": "Lab 1: Newton's 2nd Law",
+   "date": "2026-09-18",
+   "points": 25,
+   "skill": "Newton's laws",
+   "scores": {
+    "maya": 23,
+    "ethan": 20,
+    "lily": 24,
+    "mateo": 18,
+    "noah": 22,
+    "ava": 14,
+    "arjun": 21,
+    "zoe": 22,
+    "kenji": 15,
+    "olivia": 23
+   }
+  },
+  {
+   "id": "sci-3",
+   "subject": "Science",
+   "name": "Quiz 2: Forces & Motion",
+   "date": "2026-09-25",
+   "points": 20,
+   "skill": "Forces & motion",
+   "scores": {
+    "maya": 18,
+    "ethan": 16,
+    "lily": 19,
+    "mateo": 12,
+    "noah": 17,
+    "ava": 9,
+    "arjun": 17,
+    "zoe": 15,
+    "kenji": 10,
+    "olivia": 18
+   }
+  },
+  {
+   "id": "sci-4",
+   "subject": "Science",
+   "name": "Unit 1 Test",
+   "date": "2026-10-02",
+   "points": 100,
+   "skill": "Forces & motion",
+   "scores": {
+    "maya": 89,
+    "ethan": 78,
+    "lily": 94,
+    "mateo": 68,
+    "noah": 88,
+    "ava": 57,
+    "arjun": 85,
+    "zoe": 79,
+    "kenji": 60,
+    "olivia": 87
+   }
+  },
+  {
+   "id": "sci-5",
+   "subject": "Science",
+   "name": "Project: Egg Drop Design",
+   "date": "2026-10-09",
+   "points": 50,
+   "skill": "Engineering design",
+   "scores": {
+    "maya": 45,
+    "ethan": 42,
+    "lily": 47,
+    "mateo": 39,
+    "noah": 44,
+    "ava": null,
+    "arjun": 43,
+    "zoe": 41,
+    "kenji": 34,
+    "olivia": 46
+   }
+  },
+  {
+   "id": "eng-1",
+   "subject": "English 8",
+   "name": "Reading Quiz: Central Idea",
+   "date": "2026-09-10",
+   "points": 20,
+   "skill": "Central idea",
+   "scores": {
+    "maya": 19,
+    "ethan": 17,
+    "lily": 18,
+    "mateo": 12,
+    "noah": 16,
+    "ava": 11,
+    "arjun": 15,
+    "zoe": 19,
+    "kenji": 16,
+    "olivia": 17
+   }
+  },
+  {
+   "id": "eng-2",
+   "subject": "English 8",
+   "name": "Essay 1: Argument Writing",
+   "date": "2026-09-17",
+   "points": 50,
+   "skill": "Argument writing",
+   "scores": {
+    "maya": 46,
+    "ethan": 44,
+    "lily": 45,
+    "mateo": 31,
+    "noah": 38,
+    "ava": 29,
+    "arjun": 37,
+    "zoe": 47,
+    "kenji": 40,
+    "olivia": 43
+   }
+  },
+  {
+   "id": "eng-3",
+   "subject": "English 8",
+   "name": "Vocab Quiz 1",
+   "date": "2026-09-24",
+   "points": 20,
+   "skill": "Vocabulary",
+   "scores": {
+    "maya": 19,
+    "ethan": 18,
+    "lily": 17,
+    "mateo": 13,
+    "noah": 17,
+    "ava": 12,
+    "arjun": 16,
+    "zoe": 18,
+    "kenji": 17,
+    "olivia": 18
+   }
+  },
+  {
+   "id": "eng-4",
+   "subject": "English 8",
+   "name": "Grammar: Commas & Clauses",
+   "date": "2026-10-01",
+   "points": 10,
+   "skill": "Grammar",
+   "scores": {
+    "maya": 9,
+    "ethan": 9,
+    "lily": 8,
+    "mateo": 6,
+    "noah": 8,
+    "ava": null,
+    "arjun": 7,
+    "zoe": 10,
+    "kenji": 8,
+    "olivia": 9
+   }
+  },
+  {
+   "id": "eng-5",
+   "subject": "English 8",
+   "name": "Unit 1 Test",
+   "date": "2026-10-08",
+   "points": 100,
+   "skill": "Reading & writing",
+   "scores": {
+    "maya": 93,
+    "ethan": 86,
+    "lily": 90,
+    "mateo": 64,
+    "noah": 81,
+    "ava": 58,
+    "arjun": 79,
+    "zoe": 95,
+    "kenji": 82,
+    "olivia": 88
+   }
+  },
+  {
+   "id": "his-1",
+   "subject": "U.S. History",
+   "name": "Map Quiz: 13 Colonies",
+   "date": "2026-09-09",
+   "points": 20,
+   "skill": "Geography",
+   "scores": {
+    "maya": 18,
+    "ethan": 16,
+    "lily": 17,
+    "mateo": 13,
+    "noah": 17,
+    "ava": 9,
+    "arjun": 16,
+    "zoe": 18,
+    "kenji": 15,
+    "olivia": 17
+   }
+  },
+  {
+   "id": "his-2",
+   "subject": "U.S. History",
+   "name": "DBQ 1: Causes of the Revolution",
+   "date": "2026-09-16",
+   "points": 50,
+   "skill": "Primary sources",
+   "scores": {
+    "maya": 44,
+    "ethan": 40,
+    "lily": 42,
+    "mateo": 30,
+    "noah": 39,
+    "ava": 27,
+    "arjun": 38,
+    "zoe": 45,
+    "kenji": 36,
+    "olivia": 41
+   }
+  },
+  {
+   "id": "his-3",
+   "subject": "U.S. History",
+   "name": "Quiz 2: Declaration of Independence",
+   "date": "2026-09-23",
+   "points": 20,
+   "skill": "Founding documents",
+   "scores": {
+    "maya": 18,
+    "ethan": 17,
+    "lily": 18,
+    "mateo": 14,
+    "noah": 16,
+    "ava": 11,
+    "arjun": 17,
+    "zoe": 18,
+    "kenji": 15,
+    "olivia": 17
+   }
+  },
+  {
+   "id": "his-4",
+   "subject": "U.S. History",
+   "name": "Homework: Revolution Timeline",
+   "date": "2026-09-30",
+   "points": 10,
+   "skill": "Chronology",
+   "scores": {
+    "maya": 10,
+    "ethan": 9,
+    "lily": 9,
+    "mateo": null,
+    "noah": 8,
+    "ava": 5,
+    "arjun": 8,
+    "zoe": 10,
+    "kenji": 8,
+    "olivia": 9
+   }
+  },
+  {
+   "id": "his-5",
+   "subject": "U.S. History",
+   "name": "Unit 1 Test",
+   "date": "2026-10-07",
+   "points": 100,
+   "skill": "Revolution era",
+   "scores": {
+    "maya": 90,
+    "ethan": 83,
+    "lily": 88,
+    "mateo": 66,
+    "noah": 84,
+    "ava": 55,
+    "arjun": 81,
+    "zoe": 92,
+    "kenji": 77,
+    "olivia": 86
+   }
+  }
+ ],
+ "tests": [
+  {
+   "id": "alg-u1",
+   "subject": "Algebra I",
+   "name": "Unit 1 Test: Equations & Inequalities",
+   "date": "2026-10-05",
+   "gradebookId": "alg-4",
+   "note": "Multiple-choice part",
+   "items": [
+    {
+     "q": "3x − 7 = 14",
+     "options": [
+      "x = 7",
+      "x = 7/3",
+      "x = 21",
+      "x = 3"
+     ],
+     "correct": 0,
+     "skill": "Two-step equations",
+     "why": {
+      "1": "Subtracted 7 instead of adding (3x = 7)",
+      "2": "Forgot to divide by 3",
+      "3": "Divided 21 by 7 instead of by 3"
+     }
+    },
+    {
+     "q": "2(x + 4) = 18",
+     "options": [
+      "x = 5",
+      "x = 7",
+      "x = 14",
+      "x = 9"
+     ],
+     "correct": 0,
+     "skill": "Distributive property",
+     "why": {
+      "1": "Didn't distribute: wrote 2x + 4",
+      "2": "Subtracted 4 from 18 without dividing",
+      "3": "Divided 18 by 2 and stopped"
+     }
+    },
+    {
+     "q": "5x + 3 = 2x + 18",
+     "options": [
+      "x = 5",
+      "x = 3",
+      "x = 15",
+      "x = 7"
+     ],
+     "correct": 0,
+     "skill": "Variables on both sides",
+     "why": {
+      "1": "Added 2x instead of subtracting (7x = 21)",
+      "2": "Stopped at 3x = 15",
+      "3": "Added 3 instead of subtracting (3x = 21)"
+     }
+    },
+    {
+     "q": "4(x − 1) = 2(x + 5)",
+     "options": [
+      "x = 7",
+      "x = 3",
+      "x = 6",
+      "x = 2"
+     ],
+     "correct": 0,
+     "skill": "Distributive property",
+     "why": {
+      "1": "Distributed only to the first term in each parentheses",
+      "2": "Arithmetic slip after distributing",
+      "3": "Dropped the −4"
+     }
+    },
+    {
+     "q": "x ÷ 4 − 2 = 3",
+     "options": [
+      "x = 20",
+      "x = 12",
+      "x = 1.25",
+      "x = 5"
+     ],
+     "correct": 0,
+     "skill": "Equations with fractions",
+     "why": {
+      "1": "Ignored the −2 (x ÷ 4 = 3)",
+      "2": "Divided by 4 instead of multiplying",
+      "3": "Stopped at x ÷ 4 = 5"
+     }
+    },
+    {
+     "q": "Solve A = lw for w",
+     "options": [
+      "w = A ÷ l",
+      "w = A − l",
+      "w = Al",
+      "w = l ÷ A"
+     ],
+     "correct": 0,
+     "skill": "Literal equations",
+     "why": {
+      "1": "Subtracted instead of dividing",
+      "2": "Multiplied instead of dividing",
+      "3": "Divided in the wrong order"
+     }
+    },
+    {
+     "q": "−3x > 12",
+     "options": [
+      "x < −4",
+      "x > −4",
+      "x < 4",
+      "x > 4"
+     ],
+     "correct": 0,
+     "skill": "Inequalities",
+     "why": {
+      "1": "Didn't flip the sign when dividing by a negative",
+      "2": "Dropped the negative",
+      "3": "Dropped the negative and didn't flip"
+     }
+    },
+    {
+     "q": "−2 < x + 1 ≤ 5",
+     "options": [
+      "−3 < x ≤ 4",
+      "−1 < x ≤ 6",
+      "−3 ≤ x < 4",
+      "x ≤ 4"
+     ],
+     "correct": 0,
+     "skill": "Compound inequalities",
+     "why": {
+      "1": "Added 1 instead of subtracting",
+      "2": "Swapped the inequality signs",
+      "3": "Solved only one side"
+     }
+    },
+    {
+     "q": "Phone plan: $25 plus $0.10 per text. The bill is $40. How many texts?",
+     "options": [
+      "150",
+      "15",
+      "650",
+      "400"
+     ],
+     "correct": 0,
+     "skill": "Equation word problems",
+     "why": {
+      "1": "Didn't divide 15 by 0.10",
+      "2": "Added 25 instead of subtracting",
+      "3": "Divided 40 by 0.10 and ignored the $25"
+     }
+    },
+    {
+     "q": "|x − 3| = 5",
+     "options": [
+      "x = 8 or x = −2",
+      "x = 8 only",
+      "x = 2 or x = −8",
+      "x = −2 only"
+     ],
+     "correct": 0,
+     "skill": "Absolute value equations",
+     "why": {
+      "1": "Forgot the negative case",
+      "2": "Subtracted 3 in both cases",
+      "3": "Kept only the negative case"
+     }
+    }
+   ],
+   "responses": {
+    "maya": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0
+    ],
+    "ethan": [
+     0,
+     1,
+     0,
+     1,
+     0,
+     0,
+     1,
+     0,
+     0,
+     1
+    ],
+    "lily": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1
+    ],
+    "mateo": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     1,
+     1
+    ],
+    "noah": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "ava": [
+     0,
+     1,
+     1,
+     0,
+     1,
+     0,
+     1,
+     1,
+     0,
+     0
+    ],
+    "arjun": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     1
+    ],
+    "zoe": [
+     0,
+     1,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "kenji": [
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     1,
+     0,
+     0,
+     0
+    ],
+    "olivia": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     2,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "sci-q2",
+   "subject": "Science",
+   "name": "Quiz 2: Forces & Motion",
+   "date": "2026-09-25",
+   "gradebookId": "sci-3",
+   "note": "Multiple-choice part",
+   "items": [
+    {
+     "q": "A 2 kg cart accelerates at 3 m/s². Net force?",
+     "options": [
+      "6 N",
+      "1.5 N",
+      "5 N",
+      "0.67 N"
+     ],
+     "correct": 0,
+     "skill": "F = ma",
+     "why": {
+      "1": "Divided mass by acceleration",
+      "2": "Added instead of multiplying",
+      "3": "Divided acceleration by mass"
+     }
+    },
+    {
+     "q": "A book sits still on a table. The forces on it are…",
+     "options": [
+      "Balanced",
+      "Unbalanced",
+      "Zero; no forces act"
+     ],
+     "correct": 0,
+     "skill": "Balanced forces",
+     "why": {
+      "1": "Thought a still object has unbalanced forces",
+      "2": "Forgot gravity and the table's push"
+     }
+    },
+    {
+     "q": "10 N pushes right, 4 N pushes left. Net force?",
+     "options": [
+      "6 N right",
+      "14 N right",
+      "6 N left"
+     ],
+     "correct": 0,
+     "skill": "Net force",
+     "why": {
+      "1": "Added forces in opposite directions",
+      "2": "Picked the wrong direction"
+     }
+    },
+    {
+     "q": "Seatbelts protect you because of…",
+     "options": [
+      "Inertia (1st law)",
+      "Newton's 3rd law",
+      "Gravity only"
+     ],
+     "correct": 0,
+     "skill": "Newton's 1st law",
+     "why": {
+      "1": "Mixed up the 1st and 3rd laws",
+      "2": "Thought gravity throws you forward"
+     }
+    },
+    {
+     "q": "The same force pushes a 1 kg and a 4 kg cart. Which accelerates more?",
+     "options": [
+      "The 1 kg cart",
+      "The 4 kg cart",
+      "Same"
+     ],
+     "correct": 0,
+     "skill": "Newton's 2nd law",
+     "why": {
+      "1": "Thought more mass means more acceleration",
+      "2": "Ignored mass"
+     }
+    },
+    {
+     "q": "A swimmer pushes back on the pool wall. What happens?",
+     "options": [
+      "The wall pushes the swimmer forward",
+      "The wall doesn't push back",
+      "The swimmer stops"
+     ],
+     "correct": 0,
+     "skill": "Newton's 3rd law",
+     "why": {
+      "1": "Didn't see the reaction force",
+      "2": "Thought pushing stops motion"
+     }
+    }
+   ],
+   "responses": {
+    "maya": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0
+    ],
+    "ethan": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0
+    ],
+    "lily": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "mateo": [
+     1,
+     0,
+     1,
+     0,
+     0,
+     1
+    ],
+    "noah": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1
+    ],
+    "ava": [
+     1,
+     2,
+     1,
+     0,
+     1,
+     0
+    ],
+    "arjun": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0
+    ],
+    "zoe": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     1
+    ],
+    "kenji": [
+     1,
+     2,
+     0,
+     0,
+     1,
+     1
+    ],
+    "olivia": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0
+    ]
+   }
+  }
+ ]
+}

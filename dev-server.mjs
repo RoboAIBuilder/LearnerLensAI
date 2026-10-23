@@ -3,7 +3,7 @@
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, normalize } from "node:path";
-const routes = { "/api/db": (await import("./api/db.js")).default, "/api/seed": (await import("./api/seed.js")).default };
+const routes = { "/api/db": (await import("./api/db.js")).default, "/api/seed": (await import("./api/seed.js")).default, "/api/ask": (await import("./api/ask.js")).default };
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".png": "image/png", ".webmanifest": "application/manifest+json", ".json": "application/json" };
 const STATIC = new Set(["/index.html", "/sw.js", "/manifest.webmanifest"]);
 const port = Number(process.env.PORT || 3000);
