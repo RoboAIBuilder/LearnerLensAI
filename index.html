@@ -1,0 +1,1355 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style><script>/* Learner Lens storage adapter for Vercel.
+   On claude.ai the page gets a database from the platform (window.claude.use("db")).
+   Here the same interface is provided on top of /api/db, refreshed by polling. */
+(function () {
+  if (window.claude && window.claude.use) return;
+  const POLL_MS = 5000;
+  const cache = new Map();          // collection -> { docs: {id: data}, listeners: Set, loaded: bool }
+  let seedTried = false;
+
+  const entry = (c) => { if (!cache.has(c)) cache.set(c, { docs: {}, listeners: new Set(), loaded: false }); return cache.get(c); };
+  const clone = (o) => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)));
+  const docSnap = (c, id) => { const d = entry(c).docs[id]; return { id, exists: !!d, data: () => clone(d), metadata: { fromCache: false, hasPendingWrites: false } }; };
+  const colSnap = (c) => { const docs = Object.keys(entry(c).docs).sort().map((id) => docSnap(c, id)); return { docs, size: docs.length, empty: !docs.length, docChanges: () => [], metadata: { fromCache: false, hasPendingWrites: false } }; };
+  const notify = (c) => entry(c).listeners.forEach((l) => { try { l.id ? l.next(docSnap(c, l.id)) : l.next(colSnap(c)); } catch (e) { console.error(e); } });
+
+  function classCode() { try { return localStorage.getItem("ll-class-code") || ""; } catch (e) { return ""; } }
+  function setClassCode(v) { try { localStorage.setItem("ll-class-code", v); } catch (e) {} }
+
+  async function fetchCol(c) {
+    const r = await fetch("/api/db?c=" + encodeURIComponent(c), { cache: "no-store" });
+    if (r.status === 503) throw { code: "unavailable", message: "Storage is not connected" };
+    if (!r.ok) throw { code: "unavailable", message: "HTTP " + r.status };
+    const { docs } = await r.json();
+    const e = entry(c);
+    const changed = JSON.stringify(docs) !== JSON.stringify(e.docs) || !e.loaded;
+    e.docs = docs; e.loaded = true;
+    if (c === "students" && !Object.keys(docs).length && !seedTried) {
+      seedTried = true;
+      const s = await fetch("/api/seed", { method: "POST" });
+      if (s.ok && (await s.json()).seeded) { ["students", "tasks", "program", "attempts", "activity"].forEach((x) => fetchCol(x).catch(() => {})); return; }
+    }
+    if (changed) notify(c);
+  }
+
+  async function post(body, retried) {
+    const r = await fetch("/api/db", { method: "POST", headers: { "Content-Type": "application/json", "x-class-code": classCode() }, body: JSON.stringify(body) });
+    if (r.status === 401 && !retried) {
+      const v = window.prompt("Enter the class code to save changes:");
+      if (v) { setClassCode(v.trim()); return post(body, true); }
+    }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw { code: r.status === 401 || r.status === 404 || r.status === 400 ? "invalid_argument" : "unavailable", message: err.error || "HTTP " + r.status };
+    }
+  }
+
+  function docRef(path) {
+    const [c, id] = path.split("/");
+    return {
+      id, path,
+      async get() { await fetchCol(c); return docSnap(c, id); },
+      async set(data) { const e = entry(c); e.docs[id] = clone(data); notify(c); await post({ op: "set", c, id, data }); fetchCol(c).catch(() => {}); },
+      async update(data) {
+        const e = entry(c); if (e.docs[id]) { e.docs[id] = Object.assign({}, e.docs[id], clone(data)); notify(c); }
+        await post({ op: "update", c, id, data }); fetchCol(c).catch(() => {});
+      },
+      async delete() { const e = entry(c); delete e.docs[id]; notify(c); await post({ op: "delete", c, id }); fetchCol(c).catch(() => {}); },
+      onSnapshot(next, error) { const l = { id, next, error }; entry(c).listeners.add(l); fetchCol(c).catch((e) => error && error(e)); return () => entry(c).listeners.delete(l); },
+      collection() { throw new TypeError("Nested collections are not supported here"); },
+    };
+  }
+  function colRef(c) {
+    return {
+      path: c,
+      doc(id) { return docRef(c + "/" + (id || Date.now().toString(36) + Math.random().toString(36).slice(2, 8))); },
+      async add(data) { const ref = this.doc(); await ref.set(data); return ref; },
+      async get() { await fetchCol(c); return colSnap(c); },
+      onSnapshot(next, error) { const l = { next, error }; entry(c).listeners.add(l); fetchCol(c).catch((e) => error && error(e)); return () => entry(c).listeners.delete(l); },
+      where() { throw new TypeError("Queries are not supported here"); },
+    };
+  }
+  const db = { collection: colRef, doc: docRef };
+
+  setInterval(() => {
+    if (document.hidden) return;
+    for (const [c, e] of cache) if (e.listeners.size) fetchCol(c).catch(() => {});
+  }, POLL_MS);
+
+  // Resolve null if storage isn't reachable, so the page shows its "tracking is off" notice.
+  let probe = null;
+  async function available() {
+    if (!probe) probe = fetch("/api/db?c=program", { cache: "no-store" }).then((r) => r.ok).catch(() => false);
+    return probe;
+  }
+  window.claude = { use: async (name) => (name === "db" && (await available()) ? db : null) };
+})();
+</script></head><body>
+<title>Learner Lens</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: an app bar with three views (Teacher, Student, Toolkit); content in a centered 1120px column, panels stack at phone width. */
+:root{
+  --bg:#F3F5F9; --surface:#FFFFFF; --sunk:#EBEEF4; --ink:#172033; --muted:#5A6377; --line:#DCE1EA;
+  --accent:#2C59CC; --accent-ink:#FFFFFF; --accent-soft:#E5EBFA;
+  --good:#1D7F55; --good-soft:#E2F3EA; --warn:#9A6514; --warn-soft:#FBF0DC; --bad:#B8362F; --bad-soft:#FBE6E4;
+  --shadow:0 1px 2px rgba(23,32,51,.06),0 8px 24px rgba(23,32,51,.06);
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Atkinson Hyperlegible",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0E131D; --surface:#161D2A; --sunk:#111723; --ink:#E6EAF2; --muted:#9BA5B9; --line:#283247;
+  --accent:#7E9EF2; --accent-ink:#0E131D; --accent-soft:#1D2944;
+  --good:#5CCB97; --good-soft:#15302A; --warn:#E5B35C; --warn-soft:#33291A; --bad:#F2857C; --bad-soft:#3A1F1F;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E131D; --surface:#161D2A; --sunk:#111723; --ink:#E6EAF2; --muted:#9BA5B9; --line:#283247;
+  --accent:#7E9EF2; --accent-ink:#0E131D; --accent-soft:#1D2944;
+  --good:#5CCB97; --good-soft:#15302A; --warn:#E5B35C; --warn-soft:#33291A; --bad:#F2857C; --bad-soft:#3A1F1F;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+button,select,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.15}
+.wrap{max-width:1120px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-block:12px}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:var(--accent);display:grid;place-items:center}
+.brand-mark svg{width:18px;height:18px}
+.brand h1{font-size:20px;font-weight:800;letter-spacing:-.01em}
+.brand small{display:block;color:var(--muted);font-size:12px;font-family:var(--f-body)}
+.seg{display:flex;background:var(--sunk);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;padding:7px 14px;border-radius:8px;font-weight:700;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+main{padding-block:24px 64px}
+.notice{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px 16px;color:var(--muted);margin-bottom:20px}
+.notice b{color:var(--ink)}
+.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.page-head h2{font-size:28px;font-weight:800;letter-spacing:-.01em}
+.page-head p{margin:4px 0 0;color:var(--muted);max-width:62ch}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:24px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.stat .n{font-family:var(--f-display);font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat .l{color:var(--muted);font-size:13px}
+.stat.alert .n{color:var(--bad)}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.panel-h{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.panel-h h3{font-size:17px}
+.panel-b{padding:8px 16px 16px}
+.row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) 110px 150px;gap:14px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.who{min-width:0}
+.who button.name{border:0;background:none;padding:0;font-weight:700;font-size:16px;text-align:left;color:var(--ink);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.who button.name:hover{text-decoration-color:var(--accent)}
+.who .sum{color:var(--muted);font-size:13px;margin-top:2px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.chip.code{font-family:var(--f-mono);font-weight:600}
+.flag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--bad-soft);color:var(--bad)}
+.prog{min-width:0}
+.prog .t{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.meter{height:8px;border-radius:99px;background:var(--sunk);overflow:hidden;margin-top:4px}
+.meter i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .4s}
+.score{font-family:var(--f-mono);font-weight:600;font-variant-numeric:tabular-nums;font-size:14px;padding:3px 8px;border-radius:8px;display:inline-block}
+.score.good{background:var(--good-soft);color:var(--good)} .score.warn{background:var(--warn-soft);color:var(--warn)} .score.bad{background:var(--bad-soft);color:var(--bad)} .score.none{background:var(--sunk);color:var(--muted)}
+.score-l{font-size:12px;color:var(--muted);display:block;margin-top:2px}
+select.status{width:100%;padding:7px 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-weight:700;font-size:13px}
+select.status[data-v="on-track"]{color:var(--good)} select.status[data-v="needs-help"]{color:var(--bad)} select.status[data-v="goal-met"]{color:var(--accent)}
+.group{padding:12px 0;border-bottom:1px solid var(--line)}
+.group:last-child{border-bottom:0}
+.group-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.group h4{margin:0;font-size:15px}
+.group .when{font-size:12px;color:var(--muted);font-family:var(--f-mono)}
+.group .names{color:var(--muted);font-size:13px;margin:2px 0 8px}
+.btn{border:1px solid var(--line);background:var(--surface);padding:7px 12px;border-radius:9px;font-weight:700;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.small{padding:4px 10px;font-size:12px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--accent)}
+.since{margin-bottom:20px}
+.since-b{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;padding:12px 16px 16px}
+.since h4{margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:flex;gap:6px;align-items:center}
+.since ul{list-style:none;margin:0;padding:0}
+.since li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:14px;align-items:baseline}
+.since li:first-child{border-top:0}
+.since li time{color:var(--muted);font-size:12px;font-family:var(--f-mono);white-space:nowrap}
+.since .cnt{background:var(--accent);color:var(--accent-ink);border-radius:99px;padding:0 7px;font-size:12px;letter-spacing:0}
+.since .more{color:var(--muted);font-size:13px;padding-top:6px}
+.chip.new{background:var(--accent);color:var(--accent-ink)}
+.mathp{margin-bottom:20px}
+.two-sel{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin-top:12px}
+.two-sel label{display:block;margin:6px 0 4px}
+.mathp h4,.mathnow h4{font-family:var(--f-display);font-size:19px;font-weight:600;margin:2px 0}
+.mathp .when{font-size:12px;color:var(--muted);font-family:var(--f-mono)}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.next{font-size:13px;color:var(--muted);margin-top:10px}
+.next a{color:var(--accent);font-weight:700}
+.mathnow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;background:var(--surface);border:1px solid var(--accent);border-radius:14px;padding:16px}
+.mathnow p{margin:4px 0 0;color:var(--muted)}
+.topic{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 8px;border-top:1px solid var(--line);flex-wrap:wrap}
+.topic:first-of-type{border-top:0}
+.topic.cur{background:var(--accent-soft);border-radius:10px}
+.topic .tn{min-width:0}
+.topic .meta{font-size:12px;color:var(--muted);font-family:var(--f-mono)}
+.topic .btns{margin-top:0}
+.guide h2{font-size:30px;font-weight:800}
+.guide .lead{margin-bottom:4px}
+.guide .sec p{margin:0 0 8px}
+.vocab{display:grid;grid-template-columns:150px minmax(0,1fr);gap:6px 14px;margin:0}
+.vocab dt{font-weight:700}.vocab dd{margin:0}
+pre.ex{margin:0;background:var(--sunk);border-radius:9px;padding:10px 12px;font-family:var(--f-mono);font-size:14px;white-space:pre-wrap;line-height:1.6}
+.sec.warn{border-color:var(--warn)}
+.mist{margin:0;padding-left:20px}.mist li{margin-bottom:4px}
+.empty{padding:28px 8px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgba(10,14,22,.45);z-index:20}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);background:var(--bg);z-index:21;overflow-y:auto;box-shadow:var(--shadow);padding:calc(env(safe-area-inset-top,0px) + 16px) max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 32px) 20px}
+.drawer-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+.drawer-h h2{font-size:24px;font-weight:800}
+.x{border:0;background:var(--sunk);width:34px;height:34px;border-radius:9px;font-size:18px;line-height:1;flex:none}
+.sec{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:12px}
+.sec h3{font-size:15px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.subj{background:var(--sunk);border-radius:10px;padding:8px;text-align:center}
+.subj small{display:block;color:var(--muted);font-size:11px}
+.kv{display:grid;grid-template-columns:110px minmax(0,1fr);gap:4px 12px;font-size:14px;margin-top:10px}
+.kv dt{color:var(--muted)} .kv dd{margin:0}
+.task{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line)}
+.task:first-of-type{border-top:0}
+.task input{width:18px;height:18px;margin-top:2px;accent-color:var(--accent);flex:none}
+.task label{flex:1;min-width:0}
+.task .meta{font-size:12px;color:var(--muted);font-family:var(--f-mono)}
+.task.done label .tt{text-decoration:line-through;color:var(--muted)}
+.overdue{color:var(--bad);font-weight:700}
+.add{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.add select,.add input{flex:1;min-width:0;padding:7px 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-size:13px}
+textarea{width:100%;min-height:90px;border:1px solid var(--line);border-radius:9px;padding:10px;background:var(--surface);resize:vertical}
+.att{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.att:first-of-type{border-top:0}
+.att .miss{color:var(--muted);font-size:12px}
+/* student view */
+.hello{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:20px}
+.hello h2{font-size:30px;font-weight:800}
+.hello p{margin:4px 0 0;color:var(--muted)}
+.ring{width:96px;height:96px;position:relative}
+.ring svg{width:96px;height:96px;transform:rotate(-90deg)}
+.ring b{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--f-display);font-size:22px;font-variant-numeric:tabular-nums}
+.as{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.as select{padding:7px 10px;border-radius:9px;border:1px solid var(--line);background:var(--surface);font-weight:700}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.card h4{margin:0;font-size:16px;font-family:var(--f-display);font-weight:600}
+.card .meta{font-size:12px;color:var(--muted);font-family:var(--f-mono)}
+.card .go{margin-top:auto}
+.card.next{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+h3.sub{font-size:18px;margin:24px 0 10px}
+.res{display:flex;flex-wrap:wrap;gap:8px}
+.res a{color:var(--accent);font-weight:700;text-decoration:none;border:1px solid var(--line);background:var(--surface);border-radius:9px;padding:7px 12px;font-size:13px}
+.res a:hover{border-color:var(--accent)}
+/* library */
+.lib{display:grid;grid-template-columns:240px minmax(0,1fr);gap:20px;align-items:start}
+.lib-nav{display:flex;flex-direction:column;gap:6px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 80px)}
+.lib-nav button{text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:center}
+.lib-nav button[aria-current="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.lib-nav .code{font-family:var(--f-mono);font-weight:600;color:var(--accent);width:18px}
+.lib-nav .nm{font-weight:700;font-size:14px}
+.lib-body h2{font-size:26px;font-weight:800}
+.lead{color:var(--muted);margin:6px 0 0;max-width:65ch}
+.script{list-style:none;margin:0;padding:0}
+.script li{display:grid;grid-template-columns:82px minmax(0,1fr);gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+.script li:first-child{border-top:0}
+.script .tm{font-family:var(--f-mono);font-size:13px;color:var(--accent);font-weight:600}
+details{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}
+summary{cursor:pointer;font-weight:700;color:var(--accent)}
+.key{margin:8px 0 0;padding-left:20px}
+.key li{margin-bottom:10px}
+.key .ok{color:var(--good);font-weight:700}
+.key .mis{color:var(--muted);font-size:13px;display:block}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+/* quiz */
+.quiz{position:fixed;inset:0;z-index:30;background:var(--bg);overflow-y:auto;padding:calc(env(safe-area-inset-top,0px) + 16px) max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 32px) max(16px,env(safe-area-inset-left,0px))}
+.quiz-in{max-width:680px;margin:0 auto}
+.quiz-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
+.quiz-top .t{font-weight:700}
+.quiz-top .p{font-family:var(--f-mono);color:var(--muted);font-size:13px}
+.steps{display:flex;gap:4px;margin-bottom:20px}
+.steps i{flex:1;height:5px;border-radius:9px;background:var(--line)}
+.steps i.ok{background:var(--good)} .steps i.no{background:var(--bad)} .steps i.cur{background:var(--accent)}
+.passage{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px;font-size:15px}
+.passage cite{display:block;color:var(--muted);font-size:12px;font-style:normal;margin-top:6px}
+.qtext{font-family:var(--f-display);font-size:24px;font-weight:600;margin-bottom:16px;line-height:1.25}
+.opts{display:grid;gap:8px}
+.opt{text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:12px;padding:14px 16px;font-size:17px}
+.opt:hover:not([disabled]){border-color:var(--accent)}
+.opt.ok{border-color:var(--good);background:var(--good-soft)}
+.opt.no{border-color:var(--bad);background:var(--bad-soft)}
+.opt[disabled]{cursor:default}
+.fb{margin-top:14px;border-radius:12px;padding:12px 14px}
+.fb.ok{background:var(--good-soft);color:var(--good)} .fb.no{background:var(--bad-soft);color:var(--bad)}
+.fb b{display:block}
+.fb span{color:var(--ink)}
+.quiz-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.result{text-align:center;padding:24px 0}
+.result .big{font-family:var(--f-display);font-size:64px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 20px);transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:700;z-index:40;max-width:calc(100% - 32px)}
+@media (max-width:900px){
+  .cols,.lib{grid-template-columns:minmax(0,1fr)}
+  .lib-nav{position:static;flex-direction:row;overflow-x:auto}
+  .lib-nav button{flex:none}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:640px){
+  .row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .row .who{grid-column:1/-1}
+  .two,.grid4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .since-b{grid-template-columns:minmax(0,1fr)}
+  .mathnow{grid-template-columns:minmax(0,1fr)}
+  .vocab{grid-template-columns:minmax(0,1fr)}
+  .hello{grid-template-columns:minmax(0,1fr)}
+  .page-head h2{font-size:24px}
+  .qtext{font-size:20px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="bar">
+  <div class="wrap">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/><path d="M8 11.5l2 2 3.5-4"/></svg></div>
+      <div><h1>Learner Lens</h1><small>Mock 8th grade class · 10 fictional students</small></div>
+    </div>
+    <nav class="seg" aria-label="View">
+      <button id="v-teacher" data-view="teacher" aria-pressed="true">Teacher</button>
+      <button id="v-student" data-view="student" aria-pressed="false">Student</button>
+      <button id="v-library" data-view="library" aria-pressed="false">Toolkit</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="dbnote" class="notice" hidden></div>
+  <section id="teacher"></section>
+  <section id="student" hidden></section>
+  <section id="library" hidden></section>
+</main>
+<div id="overlay"></div>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script>
+/* ---------------- Toolkit library: lessons, checks, answer keys ---------------- */
+const SUBJECTS = ["Algebra I","Science","English 8","U.S. History"];
+const SKILLS = {
+  A:{name:"Equations & inequalities",short:"Equations",subject:"Algebra I",time:"2 × 20 min / week",
+    signal:"Quiz 1: Multi-step Equations averaged 68%, the only assignment under 70%. Literal equations and inequalities build on it.",
+    lesson:[["0–3 min","Warm-up: solve x + 5 = 12 and 3x = 21 aloud. Name the inverse operation for each."],["3–8 min","Multi-step: 3(2x − 4) + 5 = 2x + 9. Distribute, combine like terms, then collect x on one side."],["8–13 min","Find the error: students fix a worked example with a sign mistake, then check by substituting."],["13–15 min","Exit ticket: one equation with variables on both sides, one with parentheses. Sort students by which step broke."]],
+    lesson2:[["0–6 min","Solve A = lw for w, then P = 2l + 2w for w. Same steps as with numbers."],["6–14 min","Inequalities: solve −2x + 5 > 11. Use a number line to show why the sign flips (2 > 1 but −2 < −1)."],["14–20 min","Write an inequality from a budget story and graph it."]],
+    check:"equations-check",practice:"equations-practice",extra:"inequalities-check",
+    home:"Khan Academy Algebra 1, solving equations, 15 minutes, 3 times a week.",
+    done:"80% or higher on a fresh equations check by week 6.",
+    res:[["Khan Academy","https://www.khanacademy.org"],["Desmos graphing calculator","https://www.desmos.com/calculator"]],
+    todos:["Khan Academy: multi-step equations — 15 min","Budget task: write and solve an equation for a real purchase"]},
+  B:{name:"Science: forces & motion",short:"Forces & motion",subject:"Science",time:"2 × 20 min / week",
+    signal:"Speed & Velocity quiz averaged 75% and Forces & Motion 76%. Three students were below 70% on both.",
+    lesson:[["0–3 min","Warm-up: a soccer ball sits still until it's kicked. What changed its motion?"],["3–10 min","Speed = distance ÷ time: time a partner walking 10 m and compute it. Velocity adds a direction."],["10–15 min","Newton's laws, one demo each: coin on a card (inertia), carts of different mass (F = ma), balloon rocket (action–reaction)."],["15–20 min","Students solve two F = ma problems and label the unbalanced force in a diagram."]],
+    check:"science-check",practice:"science-practice",
+    home:"One 5-minute video per law, then explain it to someone at home in two sentences.",
+    done:"80% on a science re-check and a lab write-up that names the variables and uses F = ma correctly.",
+    res:[["PhET: Forces and Motion","https://phet.colorado.edu"],["Khan Academy: physics","https://www.khanacademy.org"]],
+    todos:["Lab write-up: Newton's 2nd law data table","Draw a force diagram for a real object at home"]},
+  C:{name:"Reading & argument writing",short:"Reading & writing",subject:"English 8",time:"2 × 25 min / week",
+    signal:"Central Idea quiz and Argument Essay both averaged 80%. Two students were near 60% on every English item.",
+    lesson:[["0–5 min","Read the short passage aloud while students follow along."],["5–12 min","Underline the claim, star the counterclaim, box the rebuttal. Write a one-line central idea."],["12–20 min","Claim, evidence, reasoning, plus a counterclaim and rebuttal. Starters: 'Some argue…', 'However…'"],["20–25 min","Students write one paragraph with a claim, two pieces of evidence and a rebuttal."]],
+    check:"reading-check",practice:"writing-practice",
+    home:"20 minutes of reading a book they choose, plus a one-sentence summary.",
+    done:"75% on a new central-idea check and a paragraph with claim, evidence, reasoning and a rebuttal.",
+    res:[["CommonLit (free leveled passages)","https://www.commonlit.org"],["Quill (grammar & sentences)","https://www.quill.org"]],
+    todos:["Read 20 minutes and write a one-sentence summary","Write one paragraph with a counterclaim and rebuttal"]},
+  D:{name:"Founding documents & primary sources",short:"Primary sources",subject:"U.S. History",time:"1 × 25 min / week",
+    signal:"DBQ on causes of the Revolution averaged 76% and the 13 Colonies map quiz 78%. Two students were well below 70% on both.",
+    lesson:[["0–5 min","Sourcing routine before reading: who wrote it, when, why, and whose point of view it shows."],["5–15 min","Read the opening of the Declaration's second paragraph. Which rights does it name, and who was left out in 1776?"],["15–25 min","Blank map of the 13 colonies: color New England, Middle and Southern regions; label Boston, Philadelphia and New Jersey."]],
+    check:"history-check",practice:"history-practice",
+    home:"10 minutes of map and timeline practice, twice a week.",
+    done:"75% on a new sources check and a DBQ paragraph that cites two documents.",
+    res:[["Digital Inquiry Group (Reading Like a Historian)","https://inquirygroup.org"]],
+    todos:["Revolution timeline: place 6 events in order","Source one document: who, when, why"]},
+  E:{name:"Missing work",short:"Missing work",subject:"All",time:"5 min, twice a week",
+    signal:"All 5 missing assignments belong to two students. Missing work hides what a student actually knows.",
+    lesson:[["Check-in 1","Ask privately: 'What's due this week? What's getting in the way? What's your plan?'"],["Check-in 2","Look at the list together. Tick off what's in, set a date for what isn't."],["Each Friday","If anything is still missing, send a short note home with the item and the new date."]],
+    home:"Parents get one short list of what's missing and the new due dates.",
+    done:"Zero missing assignments for 3 weeks in a row.",
+    res:[],
+    todos:["Turn in a missing assignment","Weekly check-in with your teacher"]}
+};
+const opt=(t,ok,why)=>({t,ok:!!ok,why:why||""});
+const QUIZZES = {
+ "equations-check":{title:"Equations check",skill:"A",qs:[
+  {q:"3x − 7 = 14",o:[opt("x = 7",1,"Add 7: 3x = 21, then divide by 3."),opt("x = 7/3",0,"Add 7 first: 3x = 21."),opt("x = 21",0,"3x = 21, so divide by 3.")]},
+  {q:"2(x + 4) = 18",o:[opt("x = 5",1,"2x + 8 = 18 → 2x = 10."),opt("x = 7",0,"Multiply the 2 by the 4 too: 2x + 8."),opt("x = 14",0,"2x = 10, so x = 5.")]},
+  {q:"5x + 3 = 2x + 18",o:[opt("x = 5",1,"3x + 3 = 18 → 3x = 15."),opt("x = 3",0,"Subtract 2x: 3x + 3 = 18, so 3x = 15."),opt("x = 15",0,"You stopped at 3x = 15. Divide by 3.")]},
+  {q:"4(x − 1) = 2(x + 5)",o:[opt("x = 7",1,"4x − 4 = 2x + 10 → 2x = 14."),opt("x = 3",0,"Distribute both sides: 4x − 4 and 2x + 10."),opt("x = 6",0,"Check: 4(5) = 20, but 2(11) = 22.")]},
+  {q:"x ÷ 4 − 2 = 3",o:[opt("x = 20",1,"Add 2, then multiply by 4."),opt("x = 4",0,"Add 2 first: x ÷ 4 = 5."),opt("x = 1.25",0,"Undo division by multiplying.")]},
+  {q:"A phone plan costs $25 plus $0.10 per text. The bill is $40. How many texts?",o:[opt("150",1,"25 + 0.10t = 40 → 0.10t = 15."),opt("15",0,"0.10t = 15, so divide 15 by 0.10."),opt("650",0,"Subtract 25 first: 40 − 25 = 15.")]}]},
+ "equations-practice":{title:"Equations practice set",skill:"A",qs:[
+  {q:"−3x + 4 = 19",o:[opt("x = −5",1,"−3x = 15, divide by −3."),opt("x = 5",0,"15 ÷ −3 is negative."),opt("x = −23/3",0,"Subtract 4, don't add it.")]},
+  {q:"6 − 2(x − 3) = 4",o:[opt("x = 4",1,"6 − 2x + 6 = 4 → −2x = −8."),opt("x = −2",0,"Distribute −2 to both terms: −2 × −3 = +6."),opt("x = 5",0,"Check: 6 − 2(2) = 2, not 4.")]},
+  {q:"Solve d = rt for t.",o:[opt("t = d ÷ r",1,"Divide both sides by r."),opt("t = dr",0,"Undo multiplication by dividing."),opt("t = d − r",0,"r multiplies t, so divide.")]},
+  {q:"How many solutions does 3(x − 2) = 3x − 6 have?",o:[opt("Infinitely many",1,"Both sides are 3x − 6."),opt("None",0,"The sides are identical, so every x works."),opt("One",0,"The x-terms cancel and leave −6 = −6.")]},
+  {q:"0.5x + 1.2 = 3.7",o:[opt("x = 5",1,"0.5x = 2.5 → x = 5."),opt("x = 1.25",0,"Divide 2.5 by 0.5, don't multiply."),opt("x = 9.8",0,"Subtract 1.2 first.")]},
+  {q:"Twice a number plus 9 equals 4 times the number minus 3. What is the number?",o:[opt("6",1,"2n + 9 = 4n − 3 → 12 = 2n."),opt("3",0,"12 = 2n, so n = 6."),opt("−6",0,"Check: 2(−6) + 9 = −3, but 4(−6) − 3 = −27.")]}]},
+ "inequalities-check":{title:"Literal equations & inequalities check",skill:"A",qs:[
+  {q:"Solve A = lw for l.",o:[opt("l = A ÷ w",1,"Divide both sides by w."),opt("l = Aw",0,"Undo multiplication by dividing."),opt("l = A − w",0,"w multiplies l, so divide.")]},
+  {q:"x + 6 < 10",o:[opt("x < 4",1,"Subtract 6."),opt("x < 16",0,"Subtract 6, don't add it."),opt("x > 4",0,"The sign only flips for negative multiplying or dividing.")]},
+  {q:"−4x ≤ 20",o:[opt("x ≥ −5",1,"Divide by −4 and flip the sign."),opt("x ≤ −5",0,"Dividing by a negative flips the sign."),opt("x ≥ 5",0,"20 ÷ −4 = −5.")]},
+  {q:"2x − 3 > 7",o:[opt("x > 5",1,"2x > 10."),opt("x > 2",0,"Add 3 first: 2x > 10."),opt("x < 5",0,"Dividing by +2 keeps the sign.")]},
+  {q:"You can spend at most $60. Tickets cost $12 each. Which inequality fits?",o:[opt("12t ≤ 60",1,"'At most' means ≤."),opt("12t ≥ 60",0,"'At most' means no more than: ≤."),opt("t + 12 ≤ 60",0,"Each ticket costs $12, so multiply.")]},
+  {q:"Solve 2x + 3y = 9 for y.",o:[opt("y = 3 − (2/3)x",1,"3y = 9 − 2x, divide every term by 3."),opt("y = 9 − 2x",0,"Divide every term by 3."),opt("y = 3 − 2x",0,"Divide 2x by 3 too.")]}]},
+ "science-check":{title:"Science check",skill:"B",passage:"Maya rolls a toy car down a ramp. It travels 3 meters in 2 seconds. Then she tapes two washers to the car to add mass and rolls it again from the same height.",qs:[
+  {q:"What is the car's average speed?",o:[opt("1.5 m/s",1,"3 m ÷ 2 s."),opt("6 m/s",0,"Speed = distance ÷ time, not ×."),opt("0.67 m/s",0,"You divided time by distance.")]},
+  {q:"In the second run, what is the independent variable?",o:[opt("The car's mass",1,"It's what Maya changes on purpose."),opt("The car's speed",0,"That's what she measures."),opt("The ramp height",0,"She keeps the height the same.")]},
+  {q:"How is velocity different from speed?",o:[opt("Velocity includes direction",1,"10 m/s north is a velocity."),opt("Velocity is always larger",0,"They have the same size; velocity adds direction."),opt("Velocity doesn't use time",0,"Both use distance and time.")]},
+  {q:"A 2 kg cart accelerates at 3 m/s². What is the net force? (F = ma)",o:[opt("6 N",1,"2 × 3 = 6."),opt("1.5 N",0,"Multiply mass by acceleration."),opt("5 N",0,"Multiply, don't add.")]},
+  {q:"A swimmer pushes backward on the pool wall. What happens?",o:[opt("The wall pushes the swimmer forward",1,"Newton's third law: equal and opposite forces."),opt("The wall doesn't push back",0,"Every action has an equal and opposite reaction."),opt("The swimmer stops",0,"The wall's push moves the swimmer forward.")]},
+  {q:"A book sits still on a table. The forces on it are…",o:[opt("Balanced",1,"Gravity down equals the table pushing up."),opt("Unbalanced",0,"Unbalanced forces would make it move."),opt("Zero; no forces act",0,"Gravity and the table still push.")]}]},
+ "science-practice":{title:"Science practice set",skill:"B",qs:[
+  {q:"A runner covers 400 m in 80 s. Average speed?",o:[opt("5 m/s",1,"400 ÷ 80."),opt("32,000 m/s",0,"Divide distance by time."),opt("0.2 m/s",0,"You divided time by distance.")]},
+  {q:"The same force pushes a 1 kg cart and a 4 kg cart. Which accelerates more?",o:[opt("The 1 kg cart",1,"Less mass, more acceleration (a = F ÷ m)."),opt("The 4 kg cart",0,"More mass means less acceleration."),opt("They accelerate the same",0,"a = F ÷ m depends on mass.")]},
+  {q:"Seatbelts protect you because of…",o:[opt("Inertia (Newton's 1st law)",1,"Your body keeps moving when the car stops."),opt("Newton's 3rd law",0,"This is about objects resisting a change in motion."),opt("Gravity only",0,"Inertia, not gravity, throws you forward.")]},
+  {q:"10 N pushes right and 4 N pushes left. Net force?",o:[opt("6 N right",1,"Opposite forces subtract: 10 − 4."),opt("14 N right",0,"Opposite directions subtract."),opt("6 N left",0,"The larger force wins: right.")]},
+  {q:"A car goes 60 km north in 2 hours. Its velocity is…",o:[opt("30 km/h north",1,"60 ÷ 2, with direction."),opt("30 km/h",0,"Velocity needs a direction."),opt("120 km/h north",0,"Divide distance by time.")]},
+  {q:"Acceleration means…",o:[opt("Speeding up, slowing down, or changing direction",1,"Any change in velocity."),opt("Only speeding up",0,"Slowing and turning count too."),opt("Moving at a constant speed",0,"Constant velocity means zero acceleration.")]}]},
+ "reading-check":{title:"Reading check",skill:"C",passage:"Some school districts have moved middle and high school start times later in the morning. Sleep researchers report that teenagers' body clocks shift later during puberty, so many students struggle to fall asleep before 11 p.m. One district that moved its start from 7:20 to 8:30 a.m. saw attendance rise and fewer students fall asleep in first period. Critics argue that later start times push sports practices and after-school jobs into the evening and cost money for new bus schedules. Supporters respond that the gains in health and learning are worth rearranging schedules.",cite:"Practice passage written for this toolkit.",qs:[
+  {q:"What is the central idea of the passage?",o:[opt("Later start times can help students' health and learning, though they create scheduling problems.",1,"It covers both sides of the debate."),opt("Teenagers fall asleep around 11 p.m.",0,"That's a supporting detail."),opt("New bus schedules cost money.",0,"That's part of the counterclaim.")]},
+  {q:"Which detail best supports the claim that later starts help students?",o:[opt("Attendance rose and fewer students fell asleep in first period.",1,"It shows a result of the change."),opt("Later starts push sports practices into the evening.",0,"That's the counterclaim."),opt("Some districts moved their start times.",0,"That says what happened, not whether it helped.")]},
+  {q:"Which sentence is a counterclaim?",o:[opt("Critics argue that later start times push sports practices…",1,"It gives the opposing view."),opt("Supporters respond that the gains are worth it.",0,"That's the rebuttal."),opt("Some school districts have moved start times later.",0,"That's background.")]},
+  {q:"In 'body clocks shift later,' shift most nearly means…",o:[opt("Move",1,"The sleep schedule moves later."),opt("Break",0,"Nothing breaks; use context."),opt("Speed up",0,"The clock moves later, not faster.")]},
+  {q:"What is the author's main purpose?",o:[opt("To inform readers about a debate",1,"Both sides are presented."),opt("To tell a story",0,"There are no characters or plot."),opt("To sell a product",0,"Nothing is for sale.")]},
+  {q:"Which is the strongest claim for an argument essay?",o:[opt("Our district should start middle school at 8:30 because rested students learn better.",1,"A clear position with a reason."),opt("School starts at 7:20.",0,"That's a fact, not an arguable claim."),opt("Sleep is important.",0,"Too vague; take a clear position.")]}]},
+ "writing-practice":{title:"Writing practice set",skill:"C",qs:[
+  {q:"Which sentence uses a comma correctly after an introductory clause?",o:[opt("Although the bus was late, we arrived on time.",1,"The comma ends the introductory clause."),opt("Although the bus was late we arrived, on time.",0,"The comma belongs after 'late'."),opt("Although, the bus was late we arrived on time.",0,"Don't put a comma right after 'Although'.")]},
+  {q:"Best evidence for the claim 'Later start times improve attendance':",o:[opt("Attendance rose after the district moved its start to 8:30.",1,"It directly supports the claim."),opt("The district has new bus routes.",0,"It doesn't show attendance changed."),opt("Some people dislike evening practices.",0,"That's about the counterclaim.")]},
+  {q:"Which phrase introduces a counterclaim?",o:[opt("Some people argue that…",1,"It signals the other side."),opt("For example,",0,"That introduces evidence."),opt("As a result,",0,"That shows an effect.")]},
+  {q:"Which sentence is reasoning (explains why the evidence matters)?",o:[opt("Rested students can focus, so they miss less class.",1,"It connects evidence to the claim."),opt("The district has 12 buses.",0,"That's a fact, not reasoning."),opt("School starts at 8:30.",0,"That's a detail, not an explanation.")]},
+  {q:"Fix the run-on: 'Practice ends at 6 we eat dinner at 7.'",o:[opt("Practice ends at 6, and we eat dinner at 7.",1,"A comma plus 'and' joins two sentences."),opt("Practice ends at 6 we eat, dinner at 7.",0,"The comma is in the wrong place."),opt("Practice ends, at 6 we eat dinner at 7.",0,"Still a run-on.")]},
+  {q:"Where does a rebuttal belong?",o:[opt("Right after the counterclaim it answers",1,"Answer the other side while it's fresh."),opt("In the title",0,"The title names the topic."),opt("Only in the first sentence",0,"The opening states your claim.")]}]},
+ "history-check":{title:"Primary sources check",skill:"D",passage:"“We hold these truths to be self-evident, that all men are created equal, that they are endowed by their Creator with certain unalienable Rights, that among these are Life, Liberty and the pursuit of Happiness.”",cite:"Declaration of Independence, adopted by the Second Continental Congress, July 4, 1776.",qs:[
+  {q:"Which group adopted this document?",o:[opt("The Second Continental Congress",1,"It voted for independence in 1776."),opt("King George III",0,"The Declaration was written against him."),opt("The Constitutional Convention",0,"That met in 1787 to write the Constitution.")]},
+  {q:"When was it adopted?",o:[opt("1776",1,"July 4, 1776."),opt("1787",0,"That's the Constitution."),opt("1620",0,"That's the Mayflower Compact.")]},
+  {q:"Which three rights does the passage name?",o:[opt("Life, liberty and the pursuit of happiness",1,"They're listed in the passage."),opt("Speech, press and religion",0,"Those are in the First Amendment (1791)."),opt("Voting, trial and property",0,"Read the passage again.")]},
+  {q:"Why do you source a document before reading it?",o:[opt("It tells you whose point of view the document shows",1,"Who, when and why shape what a source says."),opt("It makes the document shorter",0,"Sourcing adds context; it doesn't shorten anything."),opt("It isn't needed for primary sources",0,"Primary sources need sourcing most.")]},
+  {q:"New Jersey was one of the…",o:[opt("Middle colonies",1,"With New York, Pennsylvania and Delaware."),opt("New England colonies",0,"New England is north: Massachusetts, New Hampshire, Connecticut, Rhode Island."),opt("Southern colonies",0,"The Southern colonies run from Maryland south.")]},
+  {q:"Which event came first?",o:[opt("The Stamp Act (1765)",1,"It came before the Declaration (1776) and Yorktown (1781)."),opt("The Declaration of Independence",0,"That was 1776, after the Stamp Act."),opt("The Battle of Yorktown",0,"That was 1781, near the end of the war.")]}]},
+ "history-practice":{title:"Primary sources practice",skill:"D",qs:[
+  {q:"'No taxation without representation' protested…",o:[opt("Taxes passed by Parliament without colonial votes",1,"Colonists had no seats in Parliament."),opt("Taxes passed by colonial assemblies",0,"Colonists did vote for those."),opt("Any tax at all",0,"The issue was who passed the tax.")]},
+  {q:"Who was the main author of the Declaration of Independence?",o:[opt("Thomas Jefferson",1,"He wrote the first draft."),opt("George Washington",0,"He led the Continental Army."),opt("Benjamin Franklin",0,"He helped edit it.")]},
+  {q:"Which colony did William Penn found for Quakers?",o:[opt("Pennsylvania",1,"'Penn's woods.'"),opt("Virginia",0,"Virginia began at Jamestown."),opt("Massachusetts",0,"Massachusetts was founded by Puritans.")]},
+  {q:"A strong DBQ answer should…",o:[opt("Cite specific documents by name or number",1,"Evidence must point to the documents."),opt("Use only your opinion",0,"Opinions need evidence from the documents."),opt("Summarize every document in order",0,"Use the documents to support a claim.")]},
+  {q:"Where was the Battle of Trenton (1776) fought?",o:[opt("New Jersey",1,"Washington crossed the Delaware into New Jersey."),opt("New York",0,"Trenton is New Jersey's capital."),opt("Pennsylvania",0,"Washington crossed from Pennsylvania into New Jersey.")]},
+  {q:"Which document created the federal government after the Revolution?",o:[opt("The U.S. Constitution",1,"Written in 1787."),opt("The Declaration of Independence",0,"That declared independence; it didn't set up a government."),opt("The Mayflower Compact",0,"That was a 1620 Plymouth agreement.")]}]}
+};
+
+/* ---------------- Edison Math 6 year plan: study guides + practice per topic ----------------
+   Source: Public Schools of Edison Township, Math 6 curriculum (approved Sept 30, 2025).
+   Dates are estimates from the district's week-by-week pacing laid over the 2026–27 calendar. */
+const MATH6 = {
+ source:"Edison Township Math 6 curriculum (approved Sept 30, 2025)",
+ note:"Dates estimated from district pacing and the 2026–27 calendar. Teachers can set the topic their class is on.",
+ units:[
+ {n:0,name:"Prerequisite skills",mp:"MP1",topics:[
+  {id:"0",name:"Decimals & the coordinate grid",from:"2026-09-02",to:"2026-09-15",std:"5.NBT.A.3, 5.NBT.A.4, 5.G.A.1–2",
+   vocab:[["Place value","The value of a digit from its position: tenths, hundredths, thousandths."],["Ordered pair","(x, y): move across x, then up y."],["Origin","The point (0, 0) where the axes meet."]],
+   ideas:[["Compare decimals by lining up place values","Add zeros so both numbers have the same number of places.",["0.45 vs 0.405","0.450 vs 0.405 → 0.450 is greater"]],
+          ["Round by looking one place to the right","5 or more rounds up; 4 or less stays.",["Round 3.467 to the nearest tenth","Hundredths digit is 6 → 3.5"]],
+          ["Plot (x, y): across first, then up","x tells how far right, y how far up.",["(3, 5): right 3, up 5"]]],
+   mistakes:["Thinking a longer decimal is bigger (0.405 is less than 0.45).","Swapping x and y when plotting."],
+   qs:[{q:"Which number is greatest?",o:[opt("0.705",1,"Compare 0.700, 0.680 and 0.705: 705 thousandths is the most."),opt("0.68",0,"0.68 = 0.680, which is less than 0.700."),opt("0.7",0,"0.7 = 0.700, and 0.705 is 5 thousandths more.")]},
+       {q:"Round 4.276 to the nearest hundredth.",o:[opt("4.28",1,"The thousandths digit is 6, so the 7 rounds up to 8."),opt("4.27",0,"Look one place right: 6 is 5 or more, so round up."),opt("4.3",0,"That's rounding to the nearest tenth.")]},
+       {q:"What is the value of the 5 in 2.059?",o:[opt("5 hundredths (0.05)",1,"Tenths, hundredths, thousandths: 0, 5, 9."),opt("5 tenths (0.5)",0,"The tenths digit is 0."),opt("5 thousandths (0.005)",0,"The thousandths digit is 9.")]},
+       {q:"How do you plot (4, 2) from the origin?",o:[opt("Right 4, up 2",1,"x first (across), then y (up)."),opt("Up 4, right 2",0,"The first number is x: move across first."),opt("Right 2, up 4",0,"That plots (2, 4).")]},
+       {q:"How far is (1, 3) from (6, 3)?",o:[opt("5 units",1,"Same y, so subtract the x values: 6 − 1."),opt("7 units",0,"You added the x values. Subtract them."),opt("3 units",0,"3 is the y value both points share.")]}]}]},
+ {n:1,name:"Number systems & operations",mp:"MP1–2",topics:[
+  {id:"1a",name:"Integers & absolute value",from:"2026-09-16",to:"2026-09-29",std:"6.NS.C.5, 6.NS.C.6, 6.NS.C.7",
+   vocab:[["Integer","A whole number or its opposite: …, −2, −1, 0, 1, 2, …"],["Opposite","Same distance from 0, other side: 7 and −7."],["Absolute value","Distance from 0. |−12| = 12."]],
+   ideas:[["Left is less","On a number line, numbers decrease to the left.",["−8 < −3 because −8 is farther left"]],
+          ["Absolute value is a distance","It is never negative.",["|−12| = 12","|5| = 5"]],
+          ["Negative numbers in real life","Below zero, below sea level, money owed.",["30 ft below sea level → −30","Owing $15 → −15"]]],
+   mistakes:["Thinking −8 > −3 because 8 > 3.","Writing an absolute value as negative."],
+   qs:[{q:"Which is less: −6 or −2?",o:[opt("−6",1,"−6 is farther left on the number line."),opt("−2",0,"−2 is to the right of −6, so it's greater.")]},
+       {q:"|−15| = ?",o:[opt("15",1,"Absolute value is distance from 0."),opt("−15",0,"A distance is never negative.")]},
+       {q:"Order from least to greatest: 3, −5, 0, −1",o:[opt("−5, −1, 0, 3",1,"Read left to right on a number line."),opt("−1, −5, 0, 3",0,"−5 is farther left than −1."),opt("0, −1, 3, −5",0,"Negatives come before 0.")]},
+       {q:"A diver is at −30 ft. A bird is at 25 ft. Who is farther from sea level?",o:[opt("The diver",1,"|−30| = 30 is more than 25."),opt("The bird",0,"Compare distances: 30 ft vs 25 ft.")]},
+       {q:"What is the opposite of −9?",o:[opt("9",1,"Same distance from 0, other side."),opt("−9",0,"That's the number itself."),opt("1/9",0,"That's a reciprocal, not an opposite.")]}]},
+  {id:"1b",name:"Rational numbers, GCF & LCM",from:"2026-09-30",to:"2026-10-13",std:"6.NS.C.6, 6.NS.C.7, 6.NS.B.4",
+   vocab:[["Rational number","Any number that can be written as a fraction: 3, −0.5, 2/3."],["GCF","Greatest common factor: the biggest number that divides both."],["LCM","Least common multiple: the smallest number both divide into."]],
+   ideas:[["Place fractions and decimals on one number line","Convert to decimals to compare.",["−3/4 = −0.75, so −3/4 < −0.5"]],
+          ["GCF: list factors, take the biggest shared one","Use it to split things into equal groups.",["18: 1, 2, 3, 6, 9, 18","24: 1, 2, 3, 4, 6, 8, 12, 24","GCF = 6"]],
+          ["LCM: list multiples, take the first shared one","Use it when things repeat or come in packs.",["6: 6, 12, 18, 24","8: 8, 16, 24","LCM = 24"]],
+          ["Factor out the GCF","Rewrite a sum with the distributive property.",["36 + 8 = 4(9 + 2)"]]],
+   mistakes:["Mixing up GCF and LCM.","Using the product as the LCM (6 × 8 = 48 is common, but 24 is least)."],
+   qs:[{q:"GCF of 12 and 30?",o:[opt("6",1,"6 divides both, and nothing bigger does."),opt("3",0,"3 is common, but 6 is greater."),opt("60",0,"60 is the LCM.")]},
+       {q:"LCM of 4 and 6?",o:[opt("12",1,"4, 8, 12 and 6, 12: first match is 12."),opt("24",0,"24 is a common multiple, but 12 is smaller."),opt("2",0,"2 is the GCF.")]},
+       {q:"Hot dogs come 8 to a pack, buns 10 to a pack. Smallest number of each to match exactly?",o:[opt("40",1,"LCM of 8 and 10 is 40."),opt("80",0,"8 × 10 works, but 40 is the least."),opt("18",0,"Adding doesn't give a common multiple.")]},
+       {q:"Which is greater: −2/3 or −0.5?",o:[opt("−0.5",1,"−2/3 ≈ −0.67, which is farther left."),opt("−2/3",0,"For negatives, the bigger absolute value is the smaller number.")]},
+       {q:"Rewrite 24 + 36 using the GCF.",o:[opt("12(2 + 3)",1,"GCF is 12: 24 = 12 × 2, 36 = 12 × 3."),opt("6(4 + 6)",0,"Correct value, but 12 is the greatest common factor."),opt("2(12 + 36)",0,"That equals 96, not 60. Divide both numbers by the GCF.")]}]},
+  {id:"1c",name:"Dividing fractions",from:"2026-10-14",to:"2026-10-27",std:"6.NS.A.1",
+   vocab:[["Reciprocal","Flip a fraction: the reciprocal of 4/5 is 5/4."],["Quotient","The answer to a division problem."],["Improper fraction","Top bigger than bottom: 5/2 = 2 1/2."]],
+   ideas:[["Division asks 'how many groups?'","3/4 ÷ 1/8 asks how many eighths fit in 3/4.",["3/4 = 6/8, so 6 eighths fit → 6"]],
+          ["Keep, change, flip","Keep the first fraction, change ÷ to ×, flip the second.",["2/3 ÷ 4/5","= 2/3 × 5/4","= 10/12 = 5/6"]],
+          ["Convert mixed numbers first","Change to improper fractions before flipping.",["2 1/2 ÷ 1 1/4","= 5/2 ÷ 5/4 = 5/2 × 4/5","= 20/10 = 2"]],
+          ["Check by multiplying back","Quotient × divisor should equal the dividend.",["5/6 × 4/5 = 20/30 = 2/3 ✓"]]],
+   mistakes:["Flipping the first fraction instead of the second.","Forgetting to convert mixed numbers.","Expecting a smaller answer: dividing by a fraction less than 1 gives a bigger number."],
+   qs:[{q:"2/3 ÷ 4/5 = ?",o:[opt("5/6",1,"2/3 × 5/4 = 10/12 = 5/6."),opt("8/15",0,"You multiplied without flipping the second fraction."),opt("6/5",0,"You flipped the first fraction. Keep it, flip the second.")]},
+       {q:"How many 1/6-cup servings are in 2/3 cup?",o:[opt("4",1,"2/3 ÷ 1/6 = 2/3 × 6 = 4."),opt("1/9",0,"You multiplied 2/3 × 1/6. Dividing asks how many sixths fit."),opt("3",0,"2/3 = 4/6, so 4 sixths fit.")]},
+       {q:"3 1/2 ÷ 1/4 = ?",o:[opt("14",1,"7/2 × 4 = 28/2 = 14."),opt("7/8",0,"You multiplied. Flip 1/4 to 4."),opt("3 1/8",0,"Convert 3 1/2 to 7/2 first.")]},
+       {q:"A 5/8-mile trail has a marker every 1/16 mile. How many sections?",o:[opt("10",1,"5/8 × 16 = 80/8 = 10."),opt("5/128",0,"You multiplied the fractions. Flip 1/16 to 16."),opt("2",0,"5/8 = 10/16, so there are 10 sixteenths.")]},
+       {q:"1 1/4 ÷ 2 1/2 = ?",o:[opt("1/2",1,"5/4 × 2/5 = 10/20 = 1/2."),opt("2",0,"That's 2 1/2 ÷ 1 1/4. Order matters in division."),opt("3 1/8",0,"You multiplied: 5/4 × 5/2 = 25/8.")]}]},
+  {id:"1d",name:"Multi-digit decimal operations",from:"2026-10-28",to:"2026-11-20",std:"6.NS.B.2, 6.NS.B.3",
+   vocab:[["Dividend","The number being divided."],["Divisor","The number you divide by."],["Decimal places","Digits to the right of the decimal point."]],
+   ideas:[["Add and subtract: line up the decimal points","Fill empty places with zeros.",["14.60 + 3.25 = 17.85"]],
+          ["Multiply: ignore the points, then count places","Total decimal places in the factors = places in the answer.",["2.4 × 1.5 → 24 × 15 = 360","1 + 1 = 2 places → 3.60"]],
+          ["Divide by a decimal: move both points","Shift the divisor to a whole number, shift the dividend the same.",["7.2 ÷ 0.3 → 72 ÷ 3 = 24"]],
+          ["Long division with whole numbers","Divide, multiply, subtract, bring down.",["1,248 ÷ 24 = 52  (24 × 52 = 1,248)"]]],
+   mistakes:["Lining up the right edges instead of the decimal points.","Moving the decimal in only one number when dividing.","Putting the decimal point in the wrong place in a product."],
+   qs:[{q:"14.6 + 3.25 = ?",o:[opt("17.85",1,"14.60 + 3.25 = 17.85."),opt("4.71",0,"You lined up the right edges. Line up the decimal points."),opt("17.75",0,"Check the tenths: 6 + 2 = 8.")]},
+       {q:"3.6 × 0.4 = ?",o:[opt("1.44",1,"36 × 4 = 144, with 2 decimal places."),opt("14.4",0,"Count places: 1 + 1 = 2."),opt("0.144",0,"One decimal place too many.")]},
+       {q:"8.4 ÷ 0.12 = ?",o:[opt("70",1,"Move both points 2 places: 840 ÷ 12 = 70."),opt("0.7",0,"Move the point in both numbers, then divide: 840 ÷ 12."),opt("7",0,"You moved the dividend only 1 place. Move both by 2.")]},
+       {q:"2,964 ÷ 38 = ?",o:[opt("78",1,"38 × 78 = 2,964."),opt("87",0,"Check: 38 × 87 = 3,306."),opt("7.8",0,"38 × 7.8 is only about 296.")]},
+       {q:"Gas costs $3.49 a gallon. What do 12.5 gallons cost?",o:[opt("$43.63",1,"3.49 × 12.5 = 43.625, which rounds to $43.63."),opt("$436.25",0,"Count decimal places: 2 + 1 = 3, so 43.625."),opt("$15.99",0,"You added. Total cost = price × gallons.")]}]}]},
+ {n:2,name:"Ratio & rate reasoning",mp:"MP2",topics:[
+  {id:"2a",name:"Ratios, rates & unit rates",from:"2026-11-23",to:"2026-12-11",std:"6.RP.A.1, 6.RP.A.2, 6.RP.A.3a–b",
+   vocab:[["Ratio","A comparison of two amounts: 3 : 5, 3 to 5, or 3/5."],["Rate","A ratio of different units: 150 miles in 3 hours."],["Unit rate","A rate per 1: 50 miles per hour."]],
+   ideas:[["Order matters","Girls to boys is not the same as boys to girls.",["12 girls, 15 boys","Girls : boys = 12 : 15 = 4 : 5","Girls : all = 12 : 27 = 4 : 9"]],
+          ["Equivalent ratios multiply both parts","Use a ratio table or double number line.",["2 : 3 = 4 : 6 = 10 : 15"]],
+          ["Find a unit rate by dividing","Divide by the amount you want 1 of.",["$12 for 4 lb → $12 ÷ 4 = $3 per lb"]],
+          ["Compare deals with unit prices","Lower price per item is the better buy.",["5 for $4 → $0.80 each","8 for $6 → $0.75 each ✓"]]],
+   mistakes:["Adding the same number to both parts instead of multiplying.","Writing the ratio in the wrong order.","Dividing the wrong way for a unit rate."],
+   qs:[{q:"A class has 12 girls and 15 boys. Ratio of girls to all students?",o:[opt("12 : 27",1,"All students = 12 + 15 = 27."),opt("12 : 15",0,"That's girls to boys."),opt("15 : 27",0,"That's boys to all students.")]},
+       {q:"Which ratio is equivalent to 4 : 6?",o:[opt("10 : 15",1,"Both simplify to 2 : 3."),opt("6 : 8",0,"You added 2 to both. Multiply instead."),opt("8 : 10",0,"8 : 10 = 4 : 5, not 2 : 3.")]},
+       {q:"A car travels 150 miles in 3 hours. What is the unit rate?",o:[opt("50 miles per hour",1,"150 ÷ 3 = 50."),opt("450 miles per hour",0,"You multiplied. Divide by the hours."),opt("0.02 miles per hour",0,"You divided hours by miles.")]},
+       {q:"Better buy: 6 pencils for $1.80 or 10 pencils for $2.50?",o:[opt("10 for $2.50",1,"$0.25 each beats $0.30 each."),opt("6 for $1.80",0,"$1.80 ÷ 6 = $0.30 each, more than $0.25."),opt("They cost the same",0,"Find each unit price: $0.30 vs $0.25.")]},
+       {q:"Rice uses 2 cups of rice to 3 cups of water. How much rice for 9 cups of water?",o:[opt("6 cups",1,"Water × 3, so rice × 3: 2 × 3 = 6."),opt("8 cups",0,"You added 6 to both. Ratios scale by multiplying."),opt("13.5 cups",0,"You flipped the ratio. Rice is the smaller amount.")]}]},
+  {id:"2b",name:"Converting measurements",from:"2026-12-14",to:"2026-12-18",std:"6.RP.A.3d",
+   vocab:[["Conversion factor","A rate like 12 inches per foot."],["Customary units","Inches, feet, ounces, pounds, gallons."],["Metric units","Meters, grams, liters, in steps of 10."]],
+   ideas:[["Big unit to small unit: multiply","More of the small units.",["5 ft × 12 in/ft = 60 in"]],
+          ["Small unit to big unit: divide","Fewer of the big units.",["48 oz ÷ 16 oz/lb = 3 lb"]],
+          ["Metric: move the decimal point","kilo = 1,000, centi = 1/100, milli = 1/1,000.",["2.5 km = 2,500 m","3,500 mL = 3.5 L"]]],
+   mistakes:["Multiplying when going to a bigger unit.","Reading 2.5 hours as 2 hours 50 minutes."],
+   qs:[{q:"7 ft = how many inches?",o:[opt("84",1,"7 × 12 = 84."),opt("19",0,"You added 12. Multiply by 12."),opt("0.58",0,"Feet to inches gives more inches, so multiply.")]},
+       {q:"3,500 mL = how many liters?",o:[opt("3.5",1,"1,000 mL = 1 L, so divide by 1,000."),opt("3,500,000",0,"Going to a bigger unit gives a smaller number."),opt("35",0,"Divide by 1,000, not 100.")]},
+       {q:"A 64-ounce jug holds how many pounds? (16 oz = 1 lb)",o:[opt("4",1,"64 ÷ 16 = 4."),opt("1,024",0,"Ounces to pounds: divide."),opt("48",0,"You subtracted 16.")]},
+       {q:"A runner goes 5 km. 1 mile ≈ 1.6 km. About how many miles?",o:[opt("About 3.1",1,"5 ÷ 1.6 ≈ 3.1."),opt("8",0,"Miles are longer than kilometers, so the number gets smaller."),opt("About 6.6",0,"You added 1.6. Divide by it.")]},
+       {q:"2.5 hours = how many minutes?",o:[opt("150",1,"2.5 × 60 = 150."),opt("250",0,"0.5 hour is 30 minutes, not 50."),opt("125",0,"Multiply by 60 minutes per hour.")]}]},
+  {id:"2c",name:"Percent",from:"2026-12-21",to:"2027-01-22",std:"6.RP.A.3c",
+   vocab:[["Percent","Per 100: 30% = 30/100 = 0.30."],["Part","The amount that is a percent of the whole."],["Whole","The total, or 100%."]],
+   ideas:[["Percent of a number: multiply","Change the percent to a decimal first.",["25% of 80 = 0.25 × 80 = 20"]],
+          ["Find the whole: divide","If 12 is 40% of a number, the number is 12 ÷ 0.40.",["12 ÷ 0.4 = 30"]],
+          ["Use benchmarks","10% = move the point one place; 50% = half.",["10% of 70 = 7, so 30% = 21"]]],
+   mistakes:["Writing 7% as 0.7 instead of 0.07.","Giving the discount instead of the sale price."],
+   qs:[{q:"40% of 60 = ?",o:[opt("24",1,"0.4 × 60 = 24."),opt("1.5",0,"You divided 60 by 40. Multiply by 0.4."),opt("36",0,"That's 60% of 60.")]},
+       {q:"Write 7% as a decimal.",o:[opt("0.07",1,"7 hundredths."),opt("0.7",0,"0.7 = 70%."),opt("7.0",0,"7.0 = 700%.")]},
+       {q:"18 is 30% of what number?",o:[opt("60",1,"18 ÷ 0.3 = 60."),opt("5.4",0,"That's 30% of 18. Divide to find the whole."),opt("54",0,"Check: 30% of 54 = 16.2.")]},
+       {q:"A $40 shirt is 25% off. What is the sale price?",o:[opt("$30",1,"Discount = $10, so $40 − $10 = $30."),opt("$10",0,"That's the discount. Subtract it from $40."),opt("$15",0,"25% of $40 is $10.")]},
+       {q:"You got 15 of 20 questions right. What percent is that?",o:[opt("75%",1,"15/20 = 75/100."),opt("15%",0,"Percent compares to 100: scale 20 up to 100."),opt("133%",0,"You divided 20 by 15.")]}]}]},
+ {n:3,name:"Expressions, equations & inequalities",mp:"MP3",topics:[
+  {id:"3a",name:"Exponents & expressions",from:"2027-01-25",to:"2027-02-05",std:"6.EE.A.1, 6.EE.A.2",
+   vocab:[["Exponent","How many times the base is multiplied: 2⁴ = 2 × 2 × 2 × 2."],["Variable","A letter for an unknown number."],["Coefficient","The number multiplying a variable: 5 in 5x."]],
+   ideas:[["Exponents mean repeated multiplication","Not base × exponent.",["2⁴ = 16, not 8"]],
+          ["Order of operations","Parentheses, exponents, multiply/divide left to right, add/subtract left to right.",["3 + 4 × 2²","= 3 + 4 × 4 = 3 + 16 = 19"]],
+          ["Evaluate by substituting","Replace the variable, then follow the order.",["3x + 5 when x = 4 → 12 + 5 = 17"]],
+          ["Words to expressions","'Less than' reverses the order.",["5 less than n → n − 5"]]],
+   mistakes:["Reading 3⁴ as 3 × 4.","Working left to right without the order of operations.","Writing 5 − n for '5 less than n'."],
+   qs:[{q:"3⁴ = ?",o:[opt("81",1,"3 × 3 × 3 × 3 = 81."),opt("12",0,"An exponent means repeated multiplication, not 3 × 4."),opt("64",0,"That's 4³.")]},
+       {q:"10 − 2 × 3 + 4² = ?",o:[opt("20",1,"10 − 6 + 16 = 20."),opt("40",0,"You went left to right. Do the exponent and multiplication first."),opt("−12",0,"Exponent first: 4² = 16, then 2 × 3 = 6.")]},
+       {q:"Evaluate 4y − 7 when y = 5.",o:[opt("13",1,"4 × 5 − 7 = 13."),opt("38",0,"4y means 4 × y, not the number 45."),opt("−3",0,"Multiply 4 × 5 = 20 before subtracting 7.")]},
+       {q:"Write '7 less than twice a number n'.",o:[opt("2n − 7",1,"Start with twice n, then take away 7."),opt("7 − 2n",0,"'Less than' flips the order."),opt("2(n − 7)",0,"That subtracts 7 before doubling.")]},
+       {q:"In 5x + 3, what is the coefficient?",o:[opt("5",1,"It multiplies the variable."),opt("x",0,"That's the variable."),opt("3",0,"That's the constant.")]}]},
+  {id:"3b",name:"Equivalent expressions",from:"2027-02-08",to:"2027-02-19",std:"6.EE.A.3, 6.EE.A.4",
+   vocab:[["Like terms","Terms with the same variable part: 2a and 5a."],["Distributive property","a(b + c) = ab + ac."],["Equivalent","Equal for every value of the variable."]],
+   ideas:[["Distribute to every term","Multiply the outside number by each term inside.",["3(x + 4) = 3x + 12"]],
+          ["Combine like terms","Add the coefficients; constants stay separate.",["2a + 5a + 3 = 7a + 3"]],
+          ["Factor with the GCF","Pull the GCF outside the parentheses.",["6x + 9 = 3(2x + 3)"]],
+          ["Test by substituting","Equivalent expressions match for any value.",["2(x + 5) vs 2x + 5 at x = 1: 12 vs 7 → not equivalent"]]],
+   mistakes:["Multiplying only the first term: 4(x + 3) ≠ 4x + 3.","Combining a variable term with a constant."],
+   qs:[{q:"4(x + 3) = ?",o:[opt("4x + 12",1,"Multiply 4 by both x and 3."),opt("4x + 3",0,"Multiply the 4 by the 3 too."),opt("x + 12",0,"Multiply the 4 by x too.")]},
+       {q:"Simplify 5y + 2 + 3y.",o:[opt("8y + 2",1,"5y + 3y = 8y; the 2 stays."),opt("10y",0,"2 isn't a y-term, so it can't combine."),opt("15y + 2",0,"Add coefficients: 5 + 3 = 8.")]},
+       {q:"Which expression equals 12x + 18?",o:[opt("6(2x + 3)",1,"6 × 2x = 12x, 6 × 3 = 18."),opt("6(2x + 18)",0,"Divide both terms by 6: 18 ÷ 6 = 3."),opt("12(x + 18)",0,"12 × 18 = 216, not 18.")]},
+       {q:"Are 2(x + 5) and 2x + 5 equivalent?",o:[opt("No, 2(x + 5) = 2x + 10",1,"Try x = 1: 12 vs 7."),opt("Yes",0,"Substitute x = 1: 2(6) = 12 but 2 + 5 = 7.")]},
+       {q:"Simplify 3(2a + 1) + a.",o:[opt("7a + 3",1,"6a + 3 + a = 7a + 3."),opt("7a + 1",0,"Distribute the 3 to the 1 as well."),opt("9a",0,"3 is a constant; it can't join the a-terms.")]}]},
+  {id:"3c",name:"One-step equations & inequalities",from:"2027-02-22",to:"2027-03-12",std:"6.EE.B.5–8",
+   vocab:[["Equation","Two equal expressions: x + 9 = 23."],["Inverse operation","The operation that undoes another: + and −, × and ÷."],["Inequality","A comparison using <, >, ≤ or ≥."]],
+   ideas:[["Undo with the inverse operation","Do the same thing to both sides.",["x + 9 = 23 → x = 14","4x = 28 → x = 7","x ÷ 3 = 6 → x = 18"]],
+          ["Check by substituting","Put your answer back in.",["14 + 9 = 23 ✓"]],
+          ["Inequalities have many solutions","Graph on a number line: open circle for < >, closed for ≤ ≥.",["x > 4: open circle at 4, arrow right"]],
+          ["Key phrases","'At least' = ≥, 'at most' = ≤, 'more than' = >.",["At least 12 → n ≥ 12"]]],
+   mistakes:["Doing the same operation instead of the inverse.","Using > for 'at least'."],
+   qs:[{q:"x + 8.5 = 20",o:[opt("x = 11.5",1,"Subtract 8.5 from both sides."),opt("x = 28.5",0,"You added. Undo + by subtracting."),opt("x = 12.5",0,"20 − 8.5 = 11.5.")]},
+       {q:"6m = 42",o:[opt("m = 7",1,"Divide both sides by 6."),opt("m = 36",0,"You subtracted 6. Undo multiplication by dividing."),opt("m = 252",0,"You multiplied. Divide instead.")]},
+       {q:"n ÷ 4 = 9",o:[opt("n = 36",1,"Multiply both sides by 4."),opt("n = 2.25",0,"You divided again. Undo division by multiplying."),opt("n = 13",0,"You added 4. Multiply instead.")]},
+       {q:"'You must be at least 48 inches tall.' Which inequality fits?",o:[opt("h ≥ 48",1,"'At least' includes 48."),opt("h > 48",0,"'At least' includes exactly 48, so use ≥."),opt("h ≤ 48",0,"That means 48 or shorter.")]},
+       {q:"Which value is a solution of x < 5?",o:[opt("4.9",1,"4.9 is less than 5."),opt("5",0,"5 is not less than 5."),opt("7",0,"7 is greater than 5.")]}]},
+  {id:"3d",name:"Relationships between variables",from:"2027-03-15",to:"2027-03-19",std:"6.EE.C.9",
+   vocab:[["Independent variable","The input you choose (hours worked)."],["Dependent variable","The output that depends on it (pay)."],["Equation","A rule linking them: p = 12h."]],
+   ideas:[["Name the variables","Ask: which one depends on the other?",["Pay depends on hours → hours is independent"]],
+          ["Table → equation","Look for the multiply-by rule.",["x: 1, 2, 3 → y: 5, 10, 15","y = 5x"]],
+          ["Start value + rate","A starting amount plus a rate each step.",["Start 3 cm, grow 2 cm a week","h = 2w + 3"]]],
+   mistakes:["Swapping independent and dependent.","Finding a rule that only fits the first row of a table."],
+   qs:[{q:"You earn $12 per hour. Which equation gives pay p after h hours?",o:[opt("p = 12h",1,"Pay = rate × hours."),opt("h = 12p",0,"Pay depends on hours, not the other way."),opt("p = h + 12",0,"You earn 12 for every hour, so multiply.")]},
+       {q:"In p = 12h, which is the independent variable?",o:[opt("h (hours)",1,"You choose the hours; pay follows."),opt("p (pay)",0,"Pay depends on hours, so it's dependent.")]},
+       {q:"x: 1, 2, 3 and y: 5, 10, 15. Which equation fits?",o:[opt("y = 5x",1,"Each y is 5 times x."),opt("y = x + 4",0,"Works for x = 1 only. Check x = 2: 6, not 10."),opt("y = x + 5",0,"Check x = 1: 6, not 5.")]},
+       {q:"y = 3x + 2. What is y when x = 4?",o:[opt("14",1,"3 × 4 + 2 = 14."),opt("20",0,"Multiply first: 3 × 4 = 12, then add 2."),opt("9",0,"3x means 3 times x: 12, not 7.")]},
+       {q:"A plant is 3 cm tall and grows 2 cm a week. How tall after 5 weeks?",o:[opt("13 cm",1,"3 + 2 × 5 = 13."),opt("25 cm",0,"Add the starting 3 cm once, not every week."),opt("10 cm",0,"You forgot the starting 3 cm.")]}]}]},
+ {n:4,name:"Relationships in geometry",mp:"MP4",topics:[
+  {id:"4a",name:"Polygons on the coordinate plane",from:"2027-03-29",to:"2027-04-02",std:"6.G.A.3, 6.NS.C.8",
+   vocab:[["Quadrant","One of four regions: I (+,+), II (−,+), III (−,−), IV (+,−)."],["Vertex","A corner point of a polygon."],["Reflection","A flip over an axis."]],
+   ideas:[["Distance with a shared coordinate","Same side of an axis: subtract. Opposite sides: add absolute values.",["(−3, 2) to (4, 2): 3 + 4 = 7"]],
+          ["Perimeter from vertices","Find each side length, then add.",["(1,1), (1,4), (6,4), (6,1): sides 3 and 5 → 16"]],
+          ["Reflect over an axis","Over the x-axis, y changes sign. Over the y-axis, x changes sign.",["(3, −2) over x-axis → (3, 2)"]]],
+   mistakes:["Subtracting absolute values when points are on opposite sides.","Mixing up which coordinate changes in a reflection."],
+   qs:[{q:"Which quadrant is (−2, 5) in?",o:[opt("II",1,"x negative, y positive."),opt("I",0,"Quadrant I needs both positive."),opt("III",0,"Quadrant III needs both negative.")]},
+       {q:"Distance from (−4, 1) to (3, 1)?",o:[opt("7",1,"Opposite sides of the y-axis: 4 + 3."),opt("1",0,"Opposite sides: add the distances to 0, don't subtract."),opt("−7",0,"Distance is never negative.")]},
+       {q:"Rectangle with vertices (1,1), (1,4), (6,4), (6,1). Perimeter?",o:[opt("16",1,"Sides 3 and 5: 3 + 5 + 3 + 5."),opt("15",0,"That's the area."),opt("8",0,"Count all four sides.")]},
+       {q:"Reflect (3, −2) over the x-axis.",o:[opt("(3, 2)",1,"Over the x-axis, the y value changes sign."),opt("(−3, −2)",0,"That's a reflection over the y-axis."),opt("(−3, 2)",0,"Only one coordinate changes.")]},
+       {q:"Distance from (2, −6) to (2, 3)?",o:[opt("9",1,"6 + 3 = 9."),opt("3",0,"Opposite sides of the x-axis: add 6 and 3."),opt("4",0,"The x values match; use the y values.")]}]},
+  {id:"4b",name:"Area of triangles & quadrilaterals",from:"2027-04-05",to:"2027-04-16",std:"6.G.A.1",
+   vocab:[["Base & height","Height is perpendicular to the base, not the slanted side."],["Composite figure","A shape made of simpler shapes."],["Square units","Area units: cm², ft²."]],
+   ideas:[["Parallelogram: A = b × h","Use the straight-up height.",["b = 8, h = 5 → 40"]],
+          ["Triangle: A = ½ × b × h","Half of a parallelogram.",["b = 10, h = 6 → 30"]],
+          ["Trapezoid: A = ½ × (b₁ + b₂) × h","Average the two bases.",["b₁ = 6, b₂ = 10, h = 4 → ½ × 16 × 4 = 32"]],
+          ["Composite: split, then add","Break into rectangles and triangles.",["10 × 4 rectangle + triangle (b 4, h 3)","40 + 6 = 46"]]],
+   mistakes:["Forgetting the ½ for triangles and trapezoids.","Using the slanted side as the height."],
+   qs:[{q:"Triangle: base 10 cm, height 6 cm. Area?",o:[opt("30 cm²",1,"½ × 10 × 6 = 30."),opt("60 cm²",0,"You forgot the ½."),opt("16 cm²",0,"You added. Area multiplies.")]},
+       {q:"Parallelogram: base 8 m, height 5 m, slanted side 6 m. Area?",o:[opt("40 m²",1,"8 × 5 = 40."),opt("48 m²",0,"Use the height, not the slanted side."),opt("13 m²",0,"You added. Area = base × height.")]},
+       {q:"Trapezoid: bases 6 in and 10 in, height 4 in. Area?",o:[opt("32 in²",1,"½ × (6 + 10) × 4 = 32."),opt("64 in²",0,"You forgot the ½."),opt("20 in²",0,"Add the bases first: 16 × 4 ÷ 2.")]},
+       {q:"A 10 × 4 rectangle with a triangle (base 4, height 3) on one end. Total area?",o:[opt("46",1,"40 + ½ × 4 × 3 = 46."),opt("52",0,"The triangle is ½ × 4 × 3 = 6, not 12."),opt("40",0,"Add the triangle too.")]},
+       {q:"Which unit measures area?",o:[opt("cm²",1,"Area is in square units."),opt("cm",0,"That measures length."),opt("cm³",0,"That measures volume.")]}]},
+  {id:"4c",name:"Surface area & volume",from:"2027-04-19",to:"2027-04-23",std:"6.G.A.2, 6.G.A.4",
+   vocab:[["Volume","Space inside: cubic units."],["Surface area","Total area of all faces: square units."],["Net","A flat pattern that folds into a 3-D shape."]],
+   ideas:[["Volume of a rectangular prism: V = l × w × h","Works with fractions too.",["2½ × 2 × 3 = 15 cubic units"]],
+          ["Surface area: add every face","A rectangular prism has 3 pairs of faces.",["4 × 3 × 5 box: 2(12 + 20 + 15) = 94"]],
+          ["Cube shortcut","SA = 6 × side², V = side³.",["Side 3: SA = 54, V = 27"]]],
+   mistakes:["Mixing up volume and surface area.","Counting only one face of each pair."],
+   qs:[{q:"Volume of a 4 × 3 × 5 in box?",o:[opt("60 in³",1,"4 × 3 × 5 = 60."),opt("12 in³",0,"You added. Multiply all three."),opt("94 in³",0,"94 is the surface area, in square inches.")]},
+       {q:"Surface area of a cube with 4 cm edges?",o:[opt("96 cm²",1,"6 faces × 16 = 96."),opt("64 cm²",0,"64 is the volume."),opt("16 cm²",0,"That's one face. A cube has 6.")]},
+       {q:"Volume of a 1½ ft × 2 ft × 4 ft prism?",o:[opt("12 ft³",1,"1.5 × 2 × 4 = 12."),opt("7.5 ft³",0,"You added. Multiply."),opt("8 ft³",0,"Don't drop the ½: 1.5 × 8 = 12.")]},
+       {q:"How many rectangles are in the net of a rectangular prism?",o:[opt("6",1,"Top, bottom, front, back, left, right."),opt("4",0,"Don't forget top and bottom."),opt("8",0,"A box has 6 faces.")]},
+       {q:"Which tells how much a box can hold?",o:[opt("Volume",1,"Space inside."),opt("Surface area",0,"That's how much wrapping paper covers it.")]}]}]},
+ {n:5,name:"Data collection & analysis",mp:"MP4",topics:[
+  {id:"5a",name:"Statistical questions & displays",from:"2027-04-26",to:"2027-05-07",std:"6.SP.A.1–2, 6.SP.B.4",
+   vocab:[["Statistical question","Expects answers that vary."],["Dot plot / histogram","Show how data is spread; histograms group into intervals."],["Box plot","Shows min, Q1, median, Q3, max."]],
+   ideas:[["Statistical questions expect variety","Ask a group, not one person once.",["'How many hours do students sleep?' ✓","'How long did I sleep last night?' ✗"]],
+          ["Pick the display for the job","Dot plot: individual values. Histogram: ranges. Box plot: quartiles.",["Median and quartiles → box plot"]],
+          ["Read a box plot","Half the data is below the median.",["Min 2, Q1 5, median 8, Q3 10, max 15"]]],
+   mistakes:["Calling a one-answer question statistical.","Reading histogram bars as single values."],
+   qs:[{q:"Which is a statistical question?",o:[opt("How many hours do students in my class sleep?",1,"Answers will vary across students."),opt("How many hours did I sleep last night?",0,"One person, one answer: no variability.")]},
+       {q:"Which display shows the median and quartiles?",o:[opt("Box plot",1,"It's built from them."),opt("Circle graph",0,"Circle graphs show parts of a whole."),opt("Dot plot",0,"You'd have to find the quartiles yourself.")]},
+       {q:"Data: 2, 3, 3, 4, 4, 4, 7. Which value is far from the rest?",o:[opt("7",1,"The others are 2 to 4."),opt("2",0,"2 is next to 3."),opt("None",0,"7 sits apart from the cluster.")]},
+       {q:"What does each bar in a histogram show?",o:[opt("How many values fall in an interval",1,"Bars cover ranges like 10–19."),opt("One single data value",0,"That's a dot plot or bar graph.")]},
+       {q:"Box plot: min 2, Q1 5, median 8, Q3 10, max 15. Half the data is below…",o:[opt("8",1,"The median splits the data in half."),opt("5",0,"A quarter of the data is below Q1."),opt("10",0,"Three quarters are below Q3.")]}]},
+  {id:"5b",name:"Measures of center",from:"2027-05-10",to:"2027-05-14",std:"6.SP.A.3, 6.SP.B.5c–d",
+   vocab:[["Mean","Add all values, divide by how many."],["Median","Middle value when ordered."],["Mode","Most frequent value."]],
+   ideas:[["Mean = sum ÷ count","",["4, 8, 6, 5, 7, 6 → 36 ÷ 6 = 6"]],
+          ["Median: order first","Even count: average the middle two.",["3, 4, 7, 9, 12 → 7"]],
+          ["Outliers pull the mean","Use the median when there's an outlier.",["85, 88, 90, 92, 30 → mean 77, median 88"]]],
+   mistakes:["Finding the median without ordering.","Reporting the sum as the mean."],
+   qs:[{q:"Mean of 4, 7, 9, 10?",o:[opt("7.5",1,"30 ÷ 4 = 7.5."),opt("30",0,"That's the sum. Divide by 4."),opt("8",0,"That's the median.")]},
+       {q:"Median of 3, 9, 4, 7, 12?",o:[opt("7",1,"Ordered: 3, 4, 7, 9, 12."),opt("4",0,"Order the numbers first."),opt("9",0,"Order first: the middle is 7.")]},
+       {q:"Mode of 2, 5, 5, 8, 9, 9, 9?",o:[opt("9",1,"9 appears three times."),opt("5",0,"5 appears twice; 9 appears three times."),opt("8",0,"8 appears once.")]},
+       {q:"Scores: 85, 88, 90, 92, 30. Best measure of center?",o:[opt("Median, because 30 is an outlier",1,"The median (88) isn't pulled down."),opt("Mean",0,"30 pulls the mean down to 77.")]},
+       {q:"Five numbers have a mean of 8. What is their sum?",o:[opt("40",1,"Mean × count = 8 × 5."),opt("13",0,"Multiply, don't add."),opt("1.6",0,"Multiply 8 × 5, don't divide.")]}]},
+  {id:"5c",name:"Variability",from:"2027-05-17",to:"2027-05-21",std:"6.SP.A.3, 6.SP.B.5c",
+   vocab:[["Range","Max − min."],["IQR","Q3 − Q1: spread of the middle half."],["MAD","Mean absolute deviation: average distance from the mean."]],
+   ideas:[["Range and IQR","IQR ignores the extremes.",["Q1 = 6, Q3 = 14 → IQR 8"]],
+          ["Mean absolute deviation","Find the mean, each distance from it, then average.",["2, 4, 6, 8: mean 5","Distances 3, 1, 1, 3 → MAD 2"]],
+          ["Bigger spread number = more spread out","Compare classes with MAD or IQR.",["MAD 2 vs MAD 9 → second is more spread"]]],
+   mistakes:["Adding Q1 and Q3 instead of subtracting.","Giving the mean as the MAD."],
+   qs:[{q:"Range of 12, 5, 20, 9?",o:[opt("15",1,"20 − 5 = 15."),opt("8",0,"Use the max and min: 20 and 5."),opt("12",0,"Range = max − min.")]},
+       {q:"Q1 = 6 and Q3 = 14. IQR?",o:[opt("8",1,"14 − 6 = 8."),opt("20",0,"Subtract, don't add."),opt("10",0,"That's the middle of 6 and 14, not the spread.")]},
+       {q:"MAD of 2, 4, 6, 8?",o:[opt("2",1,"Mean 5; distances 3, 1, 1, 3; average 2."),opt("5",0,"That's the mean."),opt("6",0,"That's the range.")]},
+       {q:"Class A has MAD 2, Class B has MAD 9. Which is true?",o:[opt("Class B's scores are more spread out",1,"Bigger MAD = more spread."),opt("Class A's scores are more spread out",0,"A smaller MAD means values stay close to the mean.")]},
+       {q:"Which is barely affected by one outlier?",o:[opt("IQR",1,"It uses only the middle half."),opt("Range",0,"Range uses the max and min, so one extreme value changes it.")]}]}]}
+ ]};
+/* ---------------- Math 8 year plan: NJDOE Grade 8 instructional units ----------------
+   Unit order and standards: NJDOE "Mathematics Instructional Units, Grade 8".
+   Dates are estimates for 2026–27; teachers set the topic their class is on. */
+const MATH8 = {
+ source:"NJDOE Grade 8 Mathematics Instructional Units (NJSLS-M)",
+ sourceUrl:"https://www.nj.gov/education/standards/math/Docs/Math_InstructionalUnits_Grade8.pdf",
+ note:"Unit order follows the state's Grade 8 units. Edison's own Math 8 guide isn't public, so dates are estimates for 2026–27 and teachers can set the topic their class is on.",
+ units:[
+ {n:1,name:"Exponents, irrational numbers & linear equations",mp:"MP1",topics:[
+  {id:"1a",name:"Rational & irrational numbers",from:"2026-09-02",to:"2026-09-15",std:"8.NS.A.1, 8.NS.A.2",
+   vocab:[["Rational number","Can be written as a fraction of integers. Its decimal ends or repeats."],["Irrational number","Its decimal never ends or repeats: √2, π."],["Perfect square","A whole number squared: 1, 4, 9, 16, 25, …"]],
+   ideas:[["Classify by the decimal","Ends or repeats → rational. Neither → irrational.",["0.333… = 1/3 → rational","√16 = 4 → rational","√20 → irrational"]],
+          ["Repeating decimal to a fraction","Multiply to shift the repeat, then subtract.",["x = 0.444…","10x = 4.444…","9x = 4 → x = 4/9"]],
+          ["Estimate a square root between perfect squares","Find the squares on either side.",["16 < 20 < 25","so 4 < √20 < 5, about 4.5"]]],
+   mistakes:["Calling every square root irrational (√36 = 6).","Writing 0.777… as 7/10."],
+   qs:[{q:"Which number is irrational?",o:[opt("√15",1,"15 isn't a perfect square, so its decimal never ends or repeats."),opt("√25",0,"√25 = 5, a whole number."),opt("0.75",0,"0.75 ends, so it's rational (3/4)."),opt("2/3",0,"Any fraction of integers is rational.")]},
+       {q:"Write 0.777… as a fraction.",o:[opt("7/9",1,"x = 0.777…, 10x = 7.777…, so 9x = 7."),opt("7/10",0,"7/10 = 0.7 exactly, which doesn't repeat."),opt("77/100",0,"77/100 = 0.77 exactly.")]},
+       {q:"√50 is between which two whole numbers?",o:[opt("7 and 8",1,"7² = 49 and 8² = 64."),opt("25 and 26",0,"A square root isn't half the number."),opt("6 and 7",0,"6² = 36 and 7² = 49; 50 is past 49.")]},
+       {q:"Order from least to greatest: √10, 3.2, π",o:[opt("π, √10, 3.2",1,"π ≈ 3.14, √10 ≈ 3.16, then 3.2."),opt("√10, π, 3.2",0,"√10 ≈ 3.16 is more than π ≈ 3.14."),opt("3.2, π, √10",0,"3.2 is the largest of the three.")]},
+       {q:"Which number is rational?",o:[opt("√36",1,"√36 = 6."),opt("√8",0,"8 isn't a perfect square."),opt("π",0,"π never ends or repeats.")]}]},
+  {id:"1b",name:"Properties of exponents",from:"2026-09-16",to:"2026-09-29",std:"8.EE.A.1",
+   vocab:[["Base & exponent","In 3⁵, 3 is the base and 5 is the exponent."],["Zero exponent","Any nonzero number to the 0 power is 1."],["Negative exponent","Means reciprocal: 2⁻³ = 1/2³."]],
+   ideas:[["Multiply same base: add exponents","",["3² · 3⁵ = 3⁷"]],
+          ["Divide same base: subtract exponents","",["5⁷ ÷ 5⁴ = 5³"]],
+          ["Power of a power: multiply exponents","",["(2³)² = 2⁶"]],
+          ["Zero and negative exponents","",["7⁰ = 1","2⁻³ = 1/8"]]],
+   mistakes:["Multiplying the bases: 4³ · 4⁵ is 4⁸, not 16⁸.","Thinking a negative exponent makes the number negative."],
+   qs:[{q:"4³ · 4⁵ = ?",o:[opt("4⁸",1,"Same base, multiply → add exponents."),opt("4¹⁵",0,"Add the exponents when multiplying; don't multiply them."),opt("16⁸",0,"Keep the base 4.")]},
+       {q:"(3²)⁴ = ?",o:[opt("3⁸",1,"Power of a power: 2 × 4 = 8."),opt("3⁶",0,"For a power of a power, multiply the exponents."),opt("9⁸",0,"Keep the base 3.")]},
+       {q:"5⁰ = ?",o:[opt("1",1,"Any nonzero number to the 0 power is 1."),opt("0",0,"5⁰ is 1, not 0."),opt("5",0,"5¹ = 5; 5⁰ = 1.")]},
+       {q:"2⁻³ = ?",o:[opt("1/8",1,"2⁻³ = 1/2³ = 1/8."),opt("−8",0,"A negative exponent means reciprocal, not negative."),opt("−6",0,"Exponents aren't multiplied by the base.")]},
+       {q:"x⁹ ÷ x³ = ?",o:[opt("x⁶",1,"Divide → subtract: 9 − 3."),opt("x³",0,"Subtract the exponents: 9 − 3 = 6."),opt("x¹²",0,"You added. Dividing subtracts exponents.")]}]},
+  {id:"1c",name:"Scientific notation",from:"2026-09-30",to:"2026-10-09",std:"8.EE.A.3, 8.EE.A.4",
+   vocab:[["Scientific notation","a × 10ⁿ with 1 ≤ a < 10."],["Positive power","Large numbers: 4.5 × 10⁶ = 4,500,000."],["Negative power","Small numbers: 7.2 × 10⁻⁴ = 0.00072."]],
+   ideas:[["Write in scientific notation","Move the point until one nonzero digit is left of it; count the moves.",["4,500,000 = 4.5 × 10⁶","0.00072 = 7.2 × 10⁻⁴"]],
+          ["Multiply: multiply the numbers, add the exponents","",["(3 × 10⁴)(2 × 10⁵) = 6 × 10⁹"]],
+          ["Divide: divide the numbers, subtract the exponents","",["(8 × 10⁶) ÷ (2 × 10²) = 4 × 10⁴"]],
+          ["Fix the first factor if it's 10 or more","",["12 × 10⁵ = 1.2 × 10⁶"]]],
+   mistakes:["Leaving the first factor at 10 or more.","Using a positive exponent for a small number."],
+   qs:[{q:"Write 32,000,000 in scientific notation.",o:[opt("3.2 × 10⁷",1,"Move the point 7 places."),opt("32 × 10⁶",0,"The first factor must be between 1 and 10."),opt("3.2 × 10⁶",0,"Count again: 7 places.")]},
+       {q:"Write 0.00056 in scientific notation.",o:[opt("5.6 × 10⁻⁴",1,"Move the point 4 places right → 10⁻⁴."),opt("5.6 × 10⁴",0,"Small numbers have negative exponents."),opt("56 × 10⁻⁵",0,"The first factor must be between 1 and 10.")]},
+       {q:"(4 × 10³)(2 × 10⁵) = ?",o:[opt("8 × 10⁸",1,"4 × 2 = 8 and 3 + 5 = 8."),opt("8 × 10¹⁵",0,"Add the exponents; don't multiply them."),opt("6 × 10⁸",0,"Multiply 4 × 2, don't add.")]},
+       {q:"(9 × 10⁷) ÷ (3 × 10²) = ?",o:[opt("3 × 10⁵",1,"9 ÷ 3 = 3 and 7 − 2 = 5."),opt("3 × 10⁹",0,"Dividing subtracts exponents."),opt("6 × 10⁵",0,"Divide 9 by 3.")]},
+       {q:"Which is larger: 2 × 10⁻³ or 5 × 10⁻⁴?",o:[opt("2 × 10⁻³",1,"0.002 is more than 0.0005."),opt("5 × 10⁻⁴",0,"Compare exponents first: 10⁻³ is bigger than 10⁻⁴.")]}]},
+  {id:"1d",name:"Solving linear equations",from:"2026-10-12",to:"2026-10-30",std:"8.EE.C.7a–b",
+   vocab:[["Like terms","Terms with the same variable: 5x and 2x."],["Variables on both sides","Collect them on one side first."],["Number of solutions","One, none, or infinitely many."]],
+   ideas:[["Distribute and combine first","Clear parentheses, then simplify each side.",["4(x − 2) = 2x + 6","4x − 8 = 2x + 6"]],
+          ["Get variables on one side","Subtract the smaller variable term from both sides.",["5x − 3 = 2x + 9","3x − 3 = 9 → 3x = 12 → x = 4"]],
+          ["Count the solutions","Same variable terms: compare what's left.",["2x + 3 = 2x + 3 → infinitely many","2x + 3 = 2x + 5 → no solution"]]],
+   mistakes:["Distributing to only the first term.","Stopping at 3x = 12 without dividing."],
+   qs:[{q:"3x + 7 = 22",o:[opt("x = 5",1,"Subtract 7: 3x = 15, divide by 3."),opt("x = 29/3",0,"Subtract 7 before dividing, don't add."),opt("x = 15",0,"3x = 15, so divide by 3.")]},
+       {q:"5x − 3 = 2x + 9",o:[opt("x = 4",1,"3x = 12, so x = 4."),opt("x = 2",0,"Subtract 2x and add 3: 3x = 12."),opt("x = 12",0,"You stopped at 3x = 12. Divide by 3.")]},
+       {q:"4(x − 2) = 2x + 6",o:[opt("x = 7",1,"4x − 8 = 2x + 6, so 2x = 14."),opt("x = 4",0,"Distribute to both terms: 4 × −2 = −8."),opt("x = 1",0,"Check: 4(1 − 2) = −4, but 2 + 6 = 8.")]},
+       {q:"How many solutions does 3(x + 2) = 3x + 6 have?",o:[opt("Infinitely many",1,"Both sides are the same: 3x + 6."),opt("One",0,"Distribute: both sides are identical."),opt("None",0,"The sides match exactly, so every x works.")]},
+       {q:"How many solutions does 2x + 5 = 2x − 1 have?",o:[opt("None",1,"Subtract 2x: 5 = −1, which is never true."),opt("One",0,"The x-terms cancel and leave 5 = −1."),opt("Infinitely many",0,"5 and −1 aren't equal.")]}]},
+  {id:"1e",name:"Square & cube roots; volume",from:"2026-11-02",to:"2026-11-13",std:"8.EE.A.2, 8.G.C.9",
+   vocab:[["Square root","x² = 49 means x = 7 or −7."],["Cube root","x³ = 64 means x = 4."],["Volume formulas","Cylinder πr²h · cone ⅓πr²h · sphere ⁴⁄₃πr³"]],
+   ideas:[["Solve x² = p and x³ = p","Squares have two answers; cubes have one.",["x² = 81 → x = ±9","x³ = 125 → x = 5"]],
+          ["Cylinder: V = πr²h","Square the radius first.",["r = 3, h = 10","V = π · 9 · 10 = 90π ≈ 282.7"]],
+          ["Cone is ⅓ of the cylinder","",["r = 3, h = 4 → ⅓ · π · 9 · 4 = 12π"]],
+          ["Sphere: V = ⁴⁄₃πr³","Cube the radius.",["r = 3 → ⁴⁄₃ · π · 27 = 36π"]]],
+   mistakes:["Using the diameter as the radius.","Forgetting the ⅓ for cones."],
+   qs:[{q:"Solve x² = 81.",o:[opt("x = 9 or −9",1,"Both 9² and (−9)² are 81."),opt("x = 40.5",0,"A square root isn't half the number."),opt("x = 9 only",0,"(−9)² = 81 too.")]},
+       {q:"∛125 = ?",o:[opt("5",1,"5 × 5 × 5 = 125."),opt("41⅔",0,"A cube root isn't dividing by 3."),opt("25",0,"25 × 25 × 25 is far more than 125.")]},
+       {q:"Volume of a cylinder with radius 2 cm and height 5 cm?",o:[opt("20π ≈ 62.8 cm³",1,"π · 2² · 5 = 20π."),opt("10π ≈ 31.4 cm³",0,"Square the radius: 2² = 4."),opt("20 cm³",0,"Don't drop the π.")]},
+       {q:"Volume of a cone with radius 3 in and height 4 in?",o:[opt("12π ≈ 37.7 in³",1,"⅓ · π · 9 · 4 = 12π."),opt("36π ≈ 113.1 in³",0,"That's the cylinder. A cone is ⅓ of it."),opt("4π ≈ 12.6 in³",0,"Square the radius: 3² = 9.")]},
+       {q:"Volume of a sphere with radius 3?",o:[opt("36π",1,"⁴⁄₃ · π · 27 = 36π."),opt("27π",0,"Multiply by ⁴⁄₃."),opt("12π",0,"Cube the radius: 3³ = 27.")]}]}]},
+ {n:2,name:"Pythagorean theorem, congruence & similarity",mp:"MP2",topics:[
+  {id:"2a",name:"The Pythagorean theorem",from:"2026-11-16",to:"2026-12-04",std:"8.G.B.6, 8.G.B.7, 8.G.B.8",
+   vocab:[["Legs","The two sides that form the right angle."],["Hypotenuse","The longest side, across from the right angle."],["Converse","If a² + b² = c², the triangle is right."]],
+   ideas:[["a² + b² = c²","c is always the hypotenuse.",["Legs 6 and 8","36 + 64 = 100 → c = 10"]],
+          ["Finding a leg: subtract","",["c = 13, a = 5","169 − 25 = 144 → b = 12"]],
+          ["Distance between two points","Draw a right triangle; the legs are the x and y changes.",["(1, 2) to (4, 6): legs 3 and 4 → 5"]],
+          ["Is it a right triangle?","Check if the squares add up.",["9, 12, 15: 81 + 144 = 225 ✓"]]],
+   mistakes:["Adding the sides before squaring.","Adding squares when finding a leg instead of subtracting."],
+   qs:[{q:"A right triangle has legs 5 and 12. How long is the hypotenuse?",o:[opt("13",1,"25 + 144 = 169, √169 = 13."),opt("17",0,"Square first: 25 + 144, then take the root."),opt("169",0,"Take the square root of 169.")]},
+       {q:"Hypotenuse 10, one leg 6. How long is the other leg?",o:[opt("8",1,"100 − 36 = 64, √64 = 8."),opt("About 11.7",0,"When finding a leg, subtract: 100 − 36."),opt("4",0,"Subtract the squares, not the sides.")]},
+       {q:"Is a triangle with sides 7, 8, 11 a right triangle?",o:[opt("No",1,"49 + 64 = 113, but 11² = 121."),opt("Yes",0,"Check: 49 + 64 = 113 ≠ 121.")]},
+       {q:"How far is (−1, 2) from (2, 6)?",o:[opt("5",1,"Legs 3 and 4 → √25 = 5."),opt("7",0,"Use a² + b²: 9 + 16 = 25, √25 = 5."),opt("25",0,"Take the square root of 25.")]},
+       {q:"A 13-ft ladder reaches 12 ft up a wall. How far is the base from the wall?",o:[opt("5 ft",1,"169 − 144 = 25, √25 = 5."),opt("1 ft",0,"Subtract the squares, not the lengths."),opt("About 17.7 ft",0,"The ladder is the hypotenuse, so subtract.")]}]},
+  {id:"2b",name:"Transformations & congruence",from:"2026-12-07",to:"2027-01-08",std:"8.G.A.1, 8.G.A.2, 8.G.A.3",
+   vocab:[["Translation","A slide: (x, y) → (x + a, y + b)."],["Reflection","A flip over a line."],["Rotation","A turn about a point."]],
+   ideas:[["Coordinate rules","",["Reflect over x-axis: (x, −y)","Reflect over y-axis: (−x, y)","Rotate 90° counterclockwise: (−y, x)","Rotate 180°: (−x, −y)"]],
+          ["Rigid motions keep size and shape","Translations, reflections and rotations make congruent figures.",["Lengths and angles stay the same"]],
+          ["Describe a sequence","Congruent figures map onto each other by rigid motions.",["Reflect over y-axis, then translate down 3"]]],
+   mistakes:["Mixing up the x-axis and y-axis reflections.","Confusing clockwise and counterclockwise rotations."],
+   qs:[{q:"Translate (3, −1) left 4 and up 2.",o:[opt("(−1, 1)",1,"3 − 4 = −1 and −1 + 2 = 1."),opt("(7, 1)",0,"Left subtracts from x."),opt("(−1, −3)",0,"Up adds to y.")]},
+       {q:"Reflect (5, 2) over the y-axis.",o:[opt("(−5, 2)",1,"Over the y-axis, x changes sign."),opt("(5, −2)",0,"That's over the x-axis."),opt("(−5, −2)",0,"Only one coordinate changes.")]},
+       {q:"Rotate (4, 1) 90° counterclockwise about the origin.",o:[opt("(−1, 4)",1,"(x, y) → (−y, x)."),opt("(1, −4)",0,"That's 90° clockwise."),opt("(−4, −1)",0,"That's 180°.")]},
+       {q:"Which transformation does NOT always make a congruent figure?",o:[opt("Dilation",1,"Dilations change size."),opt("Rotation",0,"Rotations keep size and shape."),opt("Reflection",0,"Reflections keep size and shape.")]},
+       {q:"Rotate (2, −3) 180° about the origin.",o:[opt("(−2, 3)",1,"Both signs change."),opt("(3, 2)",0,"That's a 90° rotation."),opt("(2, 3)",0,"Change both signs for 180°.")]}]},
+  {id:"2c",name:"Dilations & similarity",from:"2027-01-11",to:"2027-01-22",std:"8.G.A.3, 8.G.A.4",
+   vocab:[["Dilation","Resizes by a scale factor k: (x, y) → (kx, ky)."],["Scale factor","k > 1 enlarges, 0 < k < 1 shrinks."],["Similar","Same shape: equal angles, proportional sides."]],
+   ideas:[["Dilate from the origin","Multiply both coordinates by k.",["(6, −4) by ½ → (3, −2)"]],
+          ["Find the scale factor","New side ÷ matching old side.",["4 × 6 rectangle → short side 10","k = 10 ÷ 4 = 2.5 → long side 15"]],
+          ["Area scales by k²","Both length and width grow.",["k = 2 → area × 4"]]],
+   mistakes:["Adding instead of multiplying to scale.","Calling similar figures congruent."],
+   qs:[{q:"Dilate (6, −4) by a scale factor of ½.",o:[opt("(3, −2)",1,"Multiply both by ½."),opt("(12, −8)",0,"A factor of ½ shrinks."),opt("(6.5, −3.5)",0,"Multiply, don't add.")]},
+       {q:"A 3-4-5 triangle is dilated by 3. New side lengths?",o:[opt("9, 12, 15",1,"Multiply each side by 3."),opt("6, 7, 8",0,"Multiply each side by 3, don't add."),opt("3, 4, 5",0,"A dilation by 3 changes the size.")]},
+       {q:"A 4 × 6 rectangle is similar to one with short side 10. How long is its long side?",o:[opt("15",1,"Scale factor 10 ÷ 4 = 2.5; 6 × 2.5 = 15."),opt("12",0,"You added 6. Multiply by the scale factor 2.5."),opt("24",0,"Scale factor is 2.5, not 4.")]},
+       {q:"A shape is dilated by a scale factor of 2. Its area becomes…",o:[opt("4 times as large",1,"Length and width both double: 2 × 2."),opt("2 times as large",0,"Both dimensions double, so area × 4.")]},
+       {q:"Similar figures always have…",o:[opt("Equal angles and proportional sides",1,"Same shape, any size."),opt("Equal sides",0,"That's congruent.")]}]},
+  {id:"2d",name:"Angles: triangles & parallel lines",from:"2027-01-25",to:"2027-02-05",std:"8.G.A.5",
+   vocab:[["Transversal","A line crossing two parallel lines."],["Exterior angle","Outside a triangle, next to an interior angle."],["Supplementary","Angles that add to 180°."]],
+   ideas:[["Triangle angles add to 180°","",["50° + 60° + x = 180° → x = 70°"]],
+          ["Exterior angle = the two far interior angles","",["40° + 75° = 115°"]],
+          ["Parallel lines and a transversal","Corresponding and alternate interior angles are equal; same-side interior add to 180°.",["One angle 65° → alternate interior 65°, same-side interior 115°"]],
+          ["AA similarity","Two matching angles make triangles similar.",["Both have 40° and 60° → similar"]]],
+   mistakes:["Mixing up alternate interior (equal) and same-side interior (add to 180°).","Assuming equal angles means congruent."],
+   qs:[{q:"A triangle has angles 50° and 60°. What is the third angle?",o:[opt("70°",1,"180 − 110 = 70."),opt("110°",0,"That's the exterior angle at that corner."),opt("90°",0,"Subtract both from 180: 180 − 110.")]},
+       {q:"An exterior angle's two far interior angles are 40° and 75°. The exterior angle is…",o:[opt("115°",1,"40 + 75 = 115."),opt("65°",0,"That's the third interior angle."),opt("35°",0,"Add the two far interior angles.")]},
+       {q:"Two parallel lines are cut by a transversal. One angle is 65°. Its alternate interior angle is…",o:[opt("65°",1,"Alternate interior angles are equal."),opt("115°",0,"That's the same-side interior angle."),opt("25°",0,"These angles aren't complementary.")]},
+       {q:"Same-side interior angles: one is 110°. The other is…",o:[opt("70°",1,"They add to 180°."),opt("110°",0,"Same-side interior angles add to 180°, not equal."),opt("90°",0,"180 − 110 = 70.")]},
+       {q:"Two triangles each have angles of 40° and 60°. They are…",o:[opt("Similar (AA)",1,"Two equal angles make them similar."),opt("Congruent",0,"Same angles, but they can be different sizes."),opt("Neither",0,"Two matching angles prove similarity.")]}]}]},
+ {n:3,name:"Linear relationships & functions",mp:"MP3",topics:[
+  {id:"3a",name:"Functions",from:"2027-02-08",to:"2027-02-19",std:"8.F.A.1, 8.F.A.3, 8.F.B.5",
+   vocab:[["Function","Each input has exactly one output."],["Linear function","Its graph is a straight line: y = mx + b."],["Nonlinear","Not a straight line: y = x²."]],
+   ideas:[["One input, one output","An input that repeats with a different output breaks it.",["{(1, 2), (2, 4), (1, 5)} → not a function"]],
+          ["Vertical line test","If a vertical line hits the graph twice, it's not a function.",["A circle fails the test"]],
+          ["Read a graph's story","Up = increasing, flat = constant, down = decreasing.",["Distance from home flat → stopped"]]],
+   mistakes:["Thinking repeated outputs break a function (only repeated inputs do).","Calling y = x² linear."],
+   qs:[{q:"Which set is a function?",o:[opt("{(1, 3), (2, 3), (3, 5)}",1,"Each input appears once."),opt("{(2, 1), (2, 4), (3, 5)}",0,"Input 2 has two outputs.")]},
+       {q:"Which equation is nonlinear?",o:[opt("y = x² + 1",1,"x² makes a curve."),opt("y = 4x − 2",0,"That's y = mx + b, a line."),opt("y = −x/2",0,"That's a line through the origin.")]},
+       {q:"A graph of a car's distance from home rises, goes flat, then falls. The flat part means…",o:[opt("The car is stopped",1,"Distance isn't changing."),opt("The car is driving away",0,"That's the rising part."),opt("The car is heading home",0,"That's the falling part.")]},
+       {q:"Is a circle the graph of a function?",o:[opt("No",1,"A vertical line hits it twice."),opt("Yes",0,"Try the vertical line test: most vertical lines hit a circle twice.")]},
+       {q:"f(x) = 2x − 5. What is f(4)?",o:[opt("3",1,"2 × 4 − 5 = 3."),opt("13",0,"Subtract 5, don't add."),opt("−3",0,"2 × 4 = 8, and 8 − 5 = 3.")]}]},
+  {id:"3b",name:"Slope & proportional relationships",from:"2027-02-22",to:"2027-03-05",std:"8.EE.B.5, 8.EE.B.6",
+   vocab:[["Slope","Rise over run: (y₂ − y₁) ÷ (x₂ − x₁)."],["Proportional","y = kx; the graph goes through the origin."],["Unit rate","The slope of a proportional graph."]],
+   ideas:[["Slope from two points","",["(1, 2) and (3, 8)","(8 − 2) ÷ (3 − 1) = 6 ÷ 2 = 3"]],
+          ["Signs of slope","Up to the right: positive. Down: negative. Flat: 0.",["(−1, 5) to (3, −3): −8 ÷ 4 = −2"]],
+          ["Compare rates in different forms","Turn each into a unit rate.",["180 miles in 3 h → 60 mph","y = 55x → 55 mph"]]],
+   mistakes:["Putting run over rise.","Calling y = 4x + 1 proportional."],
+   qs:[{q:"Slope through (2, 3) and (6, 11)?",o:[opt("2",1,"(11 − 3) ÷ (6 − 2) = 8 ÷ 4."),opt("½",0,"Rise over run: 8 ÷ 4, not 4 ÷ 8."),opt("4",0,"4 is the run. Divide the rise by it.")]},
+       {q:"Slope through (−1, 5) and (3, −3)?",o:[opt("−2",1,"(−3 − 5) ÷ (3 − (−1)) = −8 ÷ 4."),opt("2",0,"y goes down, so the slope is negative."),opt("−½",0,"Rise over run: −8 ÷ 4.")]},
+       {q:"Which equation is proportional?",o:[opt("y = 4x",1,"It passes through the origin."),opt("y = 4x + 1",0,"At x = 0, y = 1, so it misses the origin."),opt("y = x + 4",0,"It doesn't pass through the origin.")]},
+       {q:"Car A goes 180 miles in 3 hours. Car B follows y = 55x. Which is faster?",o:[opt("Car A",1,"60 mph beats 55 mph."),opt("Car B",0,"Car A's unit rate is 180 ÷ 3 = 60.")]},
+       {q:"What is the slope of a horizontal line?",o:[opt("0",1,"No rise."),opt("Undefined",0,"That's a vertical line."),opt("1",0,"A slope of 1 rises 1 for every 1 across.")]}]},
+  {id:"3c",name:"Linear functions: rate & initial value",from:"2027-03-08",to:"2027-03-19",std:"8.F.B.4, 8.F.A.2",
+   vocab:[["Slope-intercept form","y = mx + b."],["Rate of change","m: how much y changes when x goes up 1."],["Initial value","b: the value of y when x = 0."]],
+   ideas:[["Read m and b","",["y = −2x + 7 → m = −2, b = 7"]],
+          ["Build from two points","Find m, then use the y-intercept.",["(0, 4) and (2, 10)","m = 6 ÷ 2 = 3 → y = 3x + 4"]],
+          ["Build from a story","Starting amount = b, per-unit amount = m.",["$25 to join + $10 a month","y = 10x + 25"]]],
+   mistakes:["Swapping m and b.","Comparing starting fees when the question asks about rate."],
+   qs:[{q:"For y = −2x + 7, what are the slope and y-intercept?",o:[opt("Slope −2, intercept 7",1,"y = mx + b."),opt("Slope 7, intercept −2",0,"m multiplies x."),opt("Slope 2, intercept 7",0,"Keep the sign: −2.")]},
+       {q:"Which line passes through (0, 3) and (4, 11)?",o:[opt("y = 2x + 3",1,"Slope 8 ÷ 4 = 2, intercept 3."),opt("y = 3x + 2",0,"Slope = 8 ÷ 4 = 2; intercept is 3."),opt("y = 2x + 11",0,"The y-intercept is where x = 0: 3.")]},
+       {q:"A taxi costs $3 to start plus $2 per mile. Which equation gives cost c for m miles?",o:[opt("c = 2m + 3",1,"Rate 2, start 3."),opt("c = 3m + 2",0,"The per-mile charge multiplies m."),opt("c = 5m",0,"The $3 is charged once.")]},
+       {q:"x: 0, 1, 2 and y: 5, 8, 11. Which equation fits?",o:[opt("y = 3x + 5",1,"Starts at 5, goes up 3."),opt("y = 5x + 3",0,"At x = 0, y = 5, so b = 5."),opt("y = 3x",0,"At x = 0, y = 5, not 0.")]},
+       {q:"Plan A: y = 20x + 50. Plan B: y = 25x + 20. Which costs more per month?",o:[opt("Plan B",1,"$25 a month beats $20."),opt("Plan A",0,"Compare slopes, not starting fees.")]}]},
+  {id:"3d",name:"Systems of linear equations",from:"2027-03-29",to:"2027-04-16",std:"8.EE.C.8a–c",
+   vocab:[["System","Two equations with the same variables."],["Solution","The point where the lines cross."],["Substitution / elimination","Two ways to solve without graphing."]],
+   ideas:[["The solution is the intersection","",["Lines cross at (3, 6) → x = 3, y = 6"]],
+          ["Substitution","Replace one variable using the other equation.",["y = 2x and x + y = 9","x + 2x = 9 → x = 3, y = 6"]],
+          ["Elimination","Add or subtract equations to cancel a variable.",["x + y = 10","x − y = 4","2x = 14 → x = 7, y = 3"]],
+          ["How many solutions?","Same slope, different intercept → none. Same line → infinitely many.",["y = 2x + 1, y = 2x − 3 → none"]]],
+   mistakes:["Writing the point as (y, x).","Not checking the answer in both equations."],
+   qs:[{q:"Solve: y = x + 2 and y = 3x − 4",o:[opt("(3, 5)",1,"x + 2 = 3x − 4 → x = 3, y = 5."),opt("(5, 3)",0,"Write x first: (3, 5)."),opt("(1, 3)",0,"Check: 3(1) − 4 = −1, not 3.")]},
+       {q:"Solve: x + y = 10 and x − y = 4",o:[opt("(7, 3)",1,"Add: 2x = 14."),opt("(3, 7)",0,"Check: 3 − 7 = −4, not 4."),opt("(6, 4)",0,"Check: 6 − 4 = 2, not 4.")]},
+       {q:"How many solutions: y = 2x + 1 and y = 2x − 3?",o:[opt("None",1,"Same slope, different intercepts: parallel lines."),opt("One",0,"Parallel lines never cross."),opt("Infinitely many",0,"The intercepts differ, so they're different lines.")]},
+       {q:"Two lines cross at (−2, 4). What is the solution?",o:[opt("x = −2, y = 4",1,"The crossing point is the solution."),opt("x = 4, y = −2",0,"Points are written (x, y).")]},
+       {q:"Adult tickets cost $8, student tickets $5. Ten tickets cost $62. How many adult tickets?",o:[opt("4",1,"8a + 5(10 − a) = 62 → 3a = 12."),opt("6",0,"6 is the number of student tickets."),opt("7",0,"Check: 7 × 8 + 3 × 5 = 71.")]}]}]},
+ {n:4,name:"Scatter plots & two-way tables",mp:"MP4",topics:[
+  {id:"4a",name:"Scatter plots & lines of fit",from:"2027-04-19",to:"2027-04-30",std:"8.SP.A.1, 8.SP.A.2, 8.SP.A.3",
+   vocab:[["Association","Positive (both rise), negative (one falls), or none."],["Line of fit","A line close to most points."],["Outlier","A point far from the rest."]],
+   ideas:[["Describe the pattern","Direction, form (linear or not), clusters, outliers.",["More study hours, higher scores → positive"]],
+          ["Draw a line of fit","About as many points above as below.",["It doesn't need to hit any point"]],
+          ["Use and interpret the line","Slope = change per unit; intercept = starting value.",["score = 3 × hours + 40","5 hours → 55; each hour adds about 3 points"]]],
+   mistakes:["Forcing the line through the origin.","Treating association as proof of cause."],
+   qs:[{q:"As hours of TV go up, test scores go down. This is…",o:[opt("A negative association",1,"One rises as the other falls."),opt("A positive association",0,"Positive means both rise together."),opt("No association",0,"There is a clear downward pattern.")]},
+       {q:"A line of fit is y = 3x + 40. Predict y when x = 5.",o:[opt("55",1,"3 × 5 + 40 = 55."),opt("43",0,"Multiply 3 × 5 first."),opt("215",0,"Multiply only x by 3, then add 40.")]},
+       {q:"In score = 3 × hours + 40, what does 3 mean?",o:[opt("Each extra hour adds about 3 points",1,"The slope is the change per hour."),opt("The score with 0 hours",0,"That's the intercept, 40.")]},
+       {q:"A good line of fit…",o:[opt("Has about as many points above it as below",1,"It follows the overall trend."),opt("Passes through every point",0,"Real data rarely lines up perfectly."),opt("Must go through the origin",0,"The intercept can be anything.")]},
+       {q:"In a K–8 school, shoe size and reading level are positively associated. What's the best explanation?",o:[opt("Older students have bigger feet and read better",1,"Age drives both; association isn't cause."),opt("Bigger feet make better readers",0,"Association doesn't prove one causes the other.")]}]},
+  {id:"4b",name:"Two-way tables",from:"2027-05-03",to:"2027-05-07",std:"8.SP.A.4",
+   vocab:[["Two-way table","Counts for two categories at once."],["Relative frequency","A count divided by a total."],["Association","Row percentages differ between groups."]],
+   ideas:[["Read the table","",["100 students:","Sport & phone 30 · Sport, no phone 10","No sport & phone 40 · No sport, no phone 20"]],
+          ["Use the right total","'Of the students who play a sport' → divide by the sport total.",["30 ÷ 40 = 75% of athletes have a phone"]],
+          ["Compare row percentages","Different percentages suggest an association.",["Athletes 75% vs non-athletes 40 ÷ 60 ≈ 67%"]]],
+   mistakes:["Dividing by the grand total instead of the group total.","Comparing raw counts when group sizes differ."],
+   qs:[{q:"Using the table (sport & phone 30, sport & no phone 10, no sport & phone 40, no sport & no phone 20), how many students play a sport?",o:[opt("40",1,"30 + 10."),opt("70",0,"That's how many have a phone."),opt("30",0,"Add both sport cells: 30 + 10.")]},
+       {q:"What percent of all 100 students have a phone?",o:[opt("70%",1,"30 + 40 = 70 of 100."),opt("30%",0,"Add both phone cells: 30 + 40."),opt("40%",0,"Include athletes with phones too.")]},
+       {q:"Of students who play a sport, what percent have a phone?",o:[opt("75%",1,"30 ÷ 40."),opt("30%",0,"Divide by the sport total (40), not all 100."),opt("43%",0,"Use 30 out of the 40 athletes.")]},
+       {q:"Of students who don't play a sport, about what percent have a phone?",o:[opt("67%",1,"40 ÷ 60 ≈ 67%."),opt("40%",0,"Divide by the non-sport total, 60."),opt("57%",0,"40 ÷ 70 uses the wrong total.")]},
+       {q:"To check for an association, compare…",o:[opt("75% of athletes vs 67% of non-athletes",1,"Row percentages account for different group sizes."),opt("30 athletes vs 40 non-athletes with phones",0,"Raw counts mislead when groups are different sizes.")]}]}]}
+ ]};
+
+/* ---------------- Algebra I (Edison middle school, grades 7–8) ----------------
+   Units and topics: Public Schools of Edison Township, Algebra I (MS) curriculum, approved Aug 23, 2022.
+   The guide groups units by marking period without week counts, so dates are estimates for 2026–27. */
+const ALG1 = {
+ source:"Edison Township MS Algebra I curriculum, grades 7–8 (approved Aug 23, 2022)",
+ sourceUrl:"https://core-docs.s3.us-east-1.amazonaws.com/documents/asset/uploaded_file/4500/EPS/3999500/Grade_7___8_Algebra_1.pdf",
+ note:"Units follow Edison's Algebra I guide, which groups them by marking period. Dates are estimates for 2026–27; teachers can set the topic their class is on.",
+ units:[
+ {n:1,name:"Solving equations & inequalities",mp:"MP1",topics:[
+  {id:"1a",name:"Multi-step & literal equations",from:"2026-09-02",to:"2026-09-25",std:"A.CED.A.1, A.CED.A.4, A.REI.A.1, A.REI.B.3",
+   vocab:[["Literal equation","A formula with several variables, like A = lw."],["Inverse operations","Operations that undo each other: + and −, × and ÷."],["Absolute value equation","|x − 3| = 5 has two cases: x − 3 = 5 or x − 3 = −5."]],
+   ideas:[["Simplify each side, then collect x","Distribute, combine like terms, move variables to one side.",["3(2x − 4) + 5 = 2x + 9","6x − 7 = 2x + 9","4x = 16 → x = 4"]],
+          ["Solve a formula for one letter","Use the same steps as with numbers.",["2x + 3y = 12 for y","3y = 12 − 2x","y = 4 − (2/3)x"]],
+          ["Absolute value: two cases","",["|x − 3| = 5","x − 3 = 5 → x = 8","x − 3 = −5 → x = −2"]]],
+   mistakes:["Distributing to only the first term.","Forgetting the negative case in an absolute value equation."],
+   qs:[{q:"2(x + 3) − 4 = 3x − 1",o:[opt("x = 3",1,"2x + 2 = 3x − 1, so 3 = x."),opt("x = −3",0,"Subtract 2x: 2 = x − 1, so x = 3."),opt("x = 1",0,"Check: 2(4) − 4 = 4, but 3 − 1 = 2.")]},
+       {q:"Solve P = 2l + 2w for w.",o:[opt("w = (P − 2l) ÷ 2",1,"Subtract 2l, then divide by 2."),opt("w = P − 2l",0,"Divide by 2 as well."),opt("w = (P − 2) ÷ 2l",0,"Subtract the whole term 2l, then divide by 2.")]},
+       {q:"Solve |x − 4| = 6.",o:[opt("x = 10 or x = −2",1,"x − 4 = 6 or x − 4 = −6."),opt("x = 10 only",0,"Absolute value has two cases."),opt("x = 2 or x = −10",0,"Add 4 to both cases: 6 + 4 and −6 + 4.")]},
+       {q:"x ÷ 3 + 5 = 9",o:[opt("x = 12",1,"Subtract 5, then multiply by 3."),opt("x = 4/3",0,"Undo division by multiplying."),opt("x = 42",0,"Subtract 5 before multiplying.")]},
+       {q:"Gym A: $30 to join + $15 a month. Gym B: $10 + $20 a month. After how many months is the cost the same?",o:[opt("4",1,"30 + 15m = 10 + 20m → 20 = 5m."),opt("2",0,"Check: $60 vs $50."),opt("8",0,"Check: $150 vs $170.")]}]},
+  {id:"1b",name:"Inequalities",from:"2026-09-28",to:"2026-10-09",std:"A.CED.A.1, A.REI.B.3",
+   vocab:[["Inequality","Uses <, >, ≤ or ≥."],["Compound inequality","Two conditions: −2 < x ≤ 4."],["Flip rule","Multiplying or dividing by a negative reverses the sign."]],
+   ideas:[["Solve like an equation","Except: flip the sign when you multiply or divide by a negative.",["−3x > 12","x < −4"]],
+          ["Compound inequalities","Do the same step to all three parts.",["−2 < x + 1 ≤ 5","−3 < x ≤ 4"]],
+          ["Absolute value inequalities","Less than → between. Greater than → outside.",["|x| < 3 → −3 < x < 3","|x| > 3 → x < −3 or x > 3"]]],
+   mistakes:["Forgetting to flip the sign when dividing by a negative.","Using an open circle for ≤ or ≥."],
+   qs:[{q:"−2x + 5 > 11",o:[opt("x < −3",1,"−2x > 6; dividing by −2 flips the sign."),opt("x > −3",0,"Dividing by a negative flips the sign."),opt("x < 3",0,"6 ÷ −2 = −3.")]},
+       {q:"3 ≤ 2x − 1 < 9",o:[opt("2 ≤ x < 5",1,"Add 1 to all parts, then divide by 2."),opt("1 ≤ x < 4",0,"Add 1 to all three parts first."),opt("2 < x ≤ 5",0,"Keep each sign where it was.")]},
+       {q:"|x − 2| < 4",o:[opt("−2 < x < 6",1,"−4 < x − 2 < 4, then add 2."),opt("x < −2 or x > 6",0,"'Less than' gives one band between two values."),opt("−6 < x < 2",0,"Add 2 to each part, don't subtract.")]},
+       {q:"You can spend at most $50: 4 shirts at s dollars each plus $10 shipping. Which inequality fits?",o:[opt("4s + 10 ≤ 50",1,"'At most' means ≤."),opt("4s + 10 ≥ 50",0,"'At most' means no more than: ≤."),opt("4(s + 10) ≤ 50",0,"Shipping is charged once, not per shirt.")]},
+       {q:"How do you graph x ≥ −1?",o:[opt("Closed circle at −1, shade right",1,"≥ includes −1."),opt("Open circle at −1, shade right",0,"≥ includes −1, so the circle is closed."),opt("Closed circle at −1, shade left",0,"Greater than means shade right.")]}]}]},
+ {n:2,name:"Functions & relations",mp:"MP1",topics:[
+  {id:"2a",name:"Functions & relations",from:"2026-10-12",to:"2026-10-23",std:"F-IF.A.1, F-IF.A.2",
+   vocab:[["Relation","Any set of (input, output) pairs."],["Function","Each input has exactly one output."],["Domain / range","All inputs / all outputs."]],
+   ideas:[["Test for a function","A repeated input with a different output breaks it.",["{(1, 2), (2, 4), (1, 5)} → not a function"]],
+          ["Function notation","f(3) means the output when x = 3.",["f(x) = x² − 3x","f(−2) = 4 + 6 = 10"]],
+          ["Work backward","f(a) = 9 means solve for the input.",["f(x) = 2x + 1, f(a) = 9","2a + 1 = 9 → a = 4"]]],
+   mistakes:["Thinking repeated outputs break a function.","Mixing up domain (inputs) and range (outputs)."],
+   qs:[{q:"Which relation is a function?",o:[opt("{(−1, 4), (0, 4), (2, 7)}",1,"Each input appears once."),opt("{(3, 1), (3, 5), (4, 2)}",0,"Input 3 has two outputs.")]},
+       {q:"What is the domain of {(2, 5), (4, 7), (6, 5)}?",o:[opt("{2, 4, 6}",1,"The domain is the inputs."),opt("{5, 7}",0,"That's the range."),opt("{2, 4, 5, 6, 7}",0,"Use only the inputs.")]},
+       {q:"f(x) = x² − 3x. What is f(−2)?",o:[opt("10",1,"(−2)² − 3(−2) = 4 + 6."),opt("−2",0,"−3 × −2 = +6, so 4 + 6."),opt("−10",0,"(−2)² is +4.")]},
+       {q:"Is y² = x a function of x?",o:[opt("No",1,"x = 4 gives y = 2 and y = −2."),opt("Yes",0,"Try x = 4: two y-values work.")]},
+       {q:"f(x) = 2x + 1 and f(a) = 9. What is a?",o:[opt("4",1,"2a + 1 = 9 → a = 4."),opt("19",0,"That's f(9). Solve 2a + 1 = 9."),opt("5",0,"Check: f(5) = 11.")]}]}]},
+ {n:3,name:"Linear functions",mp:"MP1–2",topics:[
+  {id:"3a",name:"Slope, rate of change & direct variation",from:"2026-10-26",to:"2026-11-13",std:"F-IF.4, F-IF.7a, A-REI.10, F-LE.B.5",
+   vocab:[["Rate of change","Change in y ÷ change in x."],["Slope","Rise over run: (y₂ − y₁) ÷ (x₂ − x₁)."],["Direct variation","y = kx; k is the constant of variation."]],
+   ideas:[["Slope from two points","",["(−2, 1) and (4, −2)","(−2 − 1) ÷ (4 − (−2)) = −3 ÷ 6 = −½"]],
+          ["Graph with intercepts","Set x = 0 for the y-intercept, y = 0 for the x-intercept.",["2x + 3y = 12","(0, 4) and (6, 0)"]],
+          ["Direct variation","Find k, then use it.",["y = 12 when x = 4 → k = 3","x = 10 → y = 30"]]],
+   mistakes:["Putting run over rise.","Giving a decreasing rate a positive sign."],
+   qs:[{q:"Slope through (−2, 1) and (4, −2)?",o:[opt("−½",1,"−3 ÷ 6."),opt("−2",0,"Rise over run: −3 ÷ 6, not 6 ÷ −3."),opt("½",0,"y decreases, so the slope is negative.")]},
+       {q:"x: 1, 3, 5 and y: 7, 13, 19. What is the rate of change?",o:[opt("3",1,"y goes up 6 when x goes up 2."),opt("6",0,"Divide the change in y by the change in x: 6 ÷ 2."),opt("7",0,"7 is the first y-value.")]},
+       {q:"y varies directly with x, and y = 12 when x = 4. Find y when x = 10.",o:[opt("30",1,"k = 3, so y = 3 × 10."),opt("18",0,"Direct variation multiplies; it doesn't add 6."),opt("40",0,"k = 12 ÷ 4 = 3.")]},
+       {q:"What is the x-intercept of 3x − 4y = 12?",o:[opt("(4, 0)",1,"Set y = 0: 3x = 12."),opt("(0, −3)",0,"That's the y-intercept."),opt("(−4, 0)",0,"3x = 12, so x = 4.")]},
+       {q:"A tank drains from 80 to 20 gallons in 15 minutes. Rate of change?",o:[opt("−4 gallons per minute",1,"(20 − 80) ÷ 15."),opt("4 gallons per minute",0,"The amount decreases, so the rate is negative."),opt("−60 gallons per minute",0,"Divide −60 by 15 minutes.")]}]},
+  {id:"3b",name:"Arithmetic sequences",from:"2026-11-16",to:"2026-11-20",std:"F-IF.A.3, F-BF.A.2, F-LE.A.2",
+   vocab:[["Arithmetic sequence","Each term adds the same number."],["Common difference d","The amount added each time."],["Explicit formula","aₙ = a₁ + (n − 1)d"]],
+   ideas:[["Find d by subtracting neighbors","",["7, 11, 15, 19 → d = 4"]],
+          ["Write the formula","",["5, 8, 11, …","aₙ = 5 + (n − 1)3 = 3n + 2"]],
+          ["It's a linear function","d is the slope.",["aₙ = 3n + 2 ↔ y = 3x + 2"]]],
+   mistakes:["Using n instead of n − 1.","Calling a multiplying pattern arithmetic."],
+   qs:[{q:"Next term: 7, 11, 15, 19, …",o:[opt("23",1,"Add 4."),opt("22",0,"The difference is 4, not 3."),opt("27",0,"Add 4 once.")]},
+       {q:"Which formula fits 5, 8, 11, …?",o:[opt("aₙ = 3n + 2",1,"5 + (n − 1)3 = 3n + 2."),opt("aₙ = 5n + 3",0,"The common difference is 3."),opt("aₙ = 3n + 5",0,"Check n = 1: 8, not 5.")]},
+       {q:"20th term of 4, 9, 14, …?",o:[opt("99",1,"4 + 19 × 5."),opt("104",0,"Use n − 1 = 19, not 20."),opt("100",0,"4 + 19 × 5 = 99.")]},
+       {q:"Is 2, 4, 8, 16 arithmetic?",o:[opt("No",1,"It multiplies by 2; differences change."),opt("Yes",0,"Differences are 2, 4, 8, not constant.")]},
+       {q:"Common difference of 10, 6, 2, −2?",o:[opt("−4",1,"Each term is 4 less."),opt("4",0,"The terms decrease, so d is negative.")]}]}]},
+ {n:4,name:"Linear equations",mp:"MP2",topics:[
+  {id:"4a",name:"Writing linear equations",from:"2026-11-23",to:"2026-12-11",std:"F-BF.A.1a, F-IF.C.7a, F-LE.B.5",
+   vocab:[["Slope-intercept","y = mx + b"],["Point-slope","y − y₁ = m(x − x₁)"],["Standard form","Ax + By = C"]],
+   ideas:[["From a slope and a point","Plug in to find b.",["m = 3 through (2, 5)","5 = 3(2) + b → b = −1","y = 3x − 1"]],
+          ["From two points","Find the slope first.",["(1, 4) and (3, 10): m = 6 ÷ 2 = 3","4 = 3(1) + b → y = 3x + 1"]],
+          ["Convert forms","Solve standard form for y.",["2x + 5y = 10","y = −(2/5)x + 2"]]],
+   mistakes:["Using the point's y-value as b.","Sign errors in point-slope with negative coordinates."],
+   qs:[{q:"Line with slope 3 through (2, 5)?",o:[opt("y = 3x − 1",1,"5 = 6 + b, so b = −1."),opt("y = 3x + 5",0,"b isn't the point's y-value; solve 5 = 3(2) + b."),opt("y = 3x + 2",0,"Check: 3(2) + 2 = 8, not 5.")]},
+       {q:"Line through (1, 4) and (3, 10)?",o:[opt("y = 3x + 1",1,"m = 3, b = 4 − 3 = 1."),opt("y = 3x + 4",0,"b = 4 − 3(1) = 1."),opt("y = 2x + 2",0,"Slope = 6 ÷ 2 = 3.")]},
+       {q:"Point-slope form through (−2, 3) with slope 4?",o:[opt("y − 3 = 4(x + 2)",1,"x − (−2) = x + 2."),opt("y + 3 = 4(x − 2)",0,"Use y − y₁ and x − x₁ with (−2, 3)."),opt("y − 3 = 4(x − 2)",0,"x₁ is −2, so x − (−2) = x + 2.")]},
+       {q:"Write 2x + 5y = 10 in slope-intercept form.",o:[opt("y = −(2/5)x + 2",1,"5y = −2x + 10, divide by 5."),opt("y = (2/5)x + 2",0,"Subtracting 2x makes the slope negative."),opt("y = −2x + 10",0,"Divide every term by 5.")]},
+       {q:"Slope −½, y-intercept 6, in standard form?",o:[opt("x + 2y = 12",1,"y = −½x + 6 → 2y = −x + 12."),opt("2x + y = 6",0,"Multiply by 2 to clear the fraction: x + 2y = 12."),opt("x − 2y = 12",0,"Move −x to the left: it becomes +x.")]}]},
+  {id:"4b",name:"Parallel & perpendicular lines",from:"2026-12-14",to:"2026-12-18",std:"F-IF.C.7a, F-BF.A.1a",
+   vocab:[["Parallel","Same slope, different intercepts."],["Perpendicular","Slopes are negative reciprocals."],["Negative reciprocal","Flip and change the sign: 2/3 → −3/2."]],
+   ideas:[["Parallel keeps the slope","",["Parallel to y = 2x + 3 through (1, 7)","7 = 2 + b → y = 2x + 5"]],
+          ["Perpendicular: flip and change sign","Slopes multiply to −1.",["3 and −1/3: 3 × −1/3 = −1"]]],
+   mistakes:["Flipping without changing the sign.","Comparing lines before writing both in y = mx + b."],
+   qs:[{q:"Slope of a line parallel to y = 4x − 7?",o:[opt("4",1,"Parallel lines share a slope."),opt("−¼",0,"That's perpendicular."),opt("−7",0,"−7 is the y-intercept.")]},
+       {q:"Slope perpendicular to y = (2/3)x + 1?",o:[opt("−3/2",1,"Flip and change the sign."),opt("3/2",0,"Change the sign too."),opt("−2/3",0,"Flip it too.")]},
+       {q:"Line parallel to y = 2x + 3 through (1, 7)?",o:[opt("y = 2x + 5",1,"7 = 2(1) + b."),opt("y = −½x + 7.5",0,"Parallel keeps the slope 2."),opt("y = 2x + 7",0,"Check: 2(1) + 7 = 9, not 7.")]},
+       {q:"Are y = 3x + 1 and y = −(1/3)x − 4 perpendicular?",o:[opt("Yes",1,"3 × −1/3 = −1."),opt("No",0,"Negative reciprocal slopes are perpendicular.")]},
+       {q:"Are 2x + y = 5 and y = −2x + 1 parallel?",o:[opt("Yes",1,"Rewrite: y = −2x + 5. Both slopes are −2."),opt("No",0,"Rewrite the first as y = −2x + 5.")]}]}]},
+ {n:5,name:"Systems of equations & inequalities",mp:"MP2",topics:[
+  {id:"5a",name:"Solving systems of equations",from:"2026-12-21",to:"2027-01-15",std:"A.REI.C.5, A.REI.C.6, A.REI.D.11, A.CED.A.3",
+   vocab:[["System","Two equations with the same variables."],["Substitution","Replace one variable using the other equation."],["Elimination","Add or subtract equations to cancel a variable."]],
+   ideas:[["Substitution","",["y = 2x − 1 and 3x + y = 14","3x + 2x − 1 = 14 → x = 3, y = 5"]],
+          ["Elimination","Line up a variable to cancel; multiply first if needed.",["x + 2y = 9","3x − 2y = 7","4x = 16 → x = 4, y = 2.5"]],
+          ["Number of solutions","Same line → infinitely many. Parallel → none.",["2x + 4y = 8 and x + 2y = 4 → same line"]]],
+   mistakes:["Writing the answer as (y, x).","Not checking in both equations."],
+   qs:[{q:"y = 2x − 1 and 3x + y = 14",o:[opt("(3, 5)",1,"5x − 1 = 14 → x = 3."),opt("(5, 3)",0,"Write x first."),opt("(2, 3)",0,"Check: 3(2) + 3 = 9, not 14.")]},
+       {q:"2x + 3y = 12 and 2x − y = 4",o:[opt("(3, 2)",1,"Subtract: 4y = 8 → y = 2, then x = 3."),opt("(2, 3)",0,"Write x first: (3, 2)."),opt("(6, 0)",0,"Check the second equation: 12 − 0 = 12, not 4.")]},
+       {q:"x + 2y = 9 and 3x − 2y = 7",o:[opt("(4, 2.5)",1,"Add: 4x = 16; 2y = 5."),opt("(4, 5)",0,"2y = 5, so y = 2.5."),opt("(2.5, 4)",0,"x = 4, y = 2.5.")]},
+       {q:"How many solutions: 2x + 4y = 8 and x + 2y = 4?",o:[opt("Infinitely many",1,"The first is the second times 2."),opt("None",0,"They're the same line, not parallel."),opt("One",0,"Same line: every point works.")]},
+       {q:"3 pretzels and 2 drinks cost $13. 1 pretzel and 2 drinks cost $7. Price of a pretzel?",o:[opt("$3",1,"Subtract: 2p = 6."),opt("$2",0,"$2 is a drink."),opt("$6",0,"2p = 6, so one pretzel is $3.")]}]},
+  {id:"5b",name:"Linear inequalities & systems",from:"2027-01-18",to:"2027-01-27",std:"A.REI.D.12, A.CED.A.3",
+   vocab:[["Boundary line","Solid for ≤ ≥, dashed for < >."],["Half-plane","The shaded side of the line."],["Test point","Try (0, 0) to choose a side."]],
+   ideas:[["Graph one inequality","",["y > 2x − 1: dashed line, shade above"]],
+          ["Systems: shade the overlap","Solutions satisfy both.",["y < x + 1 and y > −2"]],
+          ["Write from a story","",["Adults $10, students $6, at least $300","10a + 6s ≥ 300"]]],
+   mistakes:["Solid line for < or >.","Shading the wrong side; check a test point."],
+   qs:[{q:"How do you graph y ≤ −x + 3?",o:[opt("Solid line, shade below",1,"≤ includes the line; 'less than' is below."),opt("Dashed line, shade below",0,"≤ includes the line, so it's solid."),opt("Solid line, shade above",0,"y ≤ means below the line.")]},
+       {q:"Is (2, 1) a solution of y > 3x − 4?",o:[opt("No",1,"3(2) − 4 = 2, and 1 is not greater than 2."),opt("Yes",0,"Check: 1 > 2 is false.")]},
+       {q:"Which point solves both y < x + 1 and y > −2?",o:[opt("(0, 0)",1,"0 < 1 and 0 > −2."),opt("(0, 2)",0,"2 is not less than 1."),opt("(1, −3)",0,"−3 is not greater than −2.")]},
+       {q:"Adult tickets $10, student $6. Sales must be at least $300. Which inequality?",o:[opt("10a + 6s ≥ 300",1,"'At least' means ≥."),opt("10a + 6s ≤ 300",0,"'At least' means 300 or more."),opt("16(a + s) ≥ 300",0,"Each ticket type has its own price.")]},
+       {q:"A dashed boundary line means…",o:[opt("Points on the line are not solutions",1,"Used for < and >."),opt("Points on the line are solutions",0,"That's a solid line.")]}]}]},
+ {n:6,name:"Exponential functions",mp:"MP3",topics:[
+  {id:"6a",name:"Exponent properties & rational exponents",from:"2027-01-28",to:"2027-02-10",std:"N-RN.A.1, N-RN.A.2, A-SSE.A.1b",
+   vocab:[["Power of a product","(ab)ⁿ = aⁿbⁿ"],["Negative exponent","x⁻ⁿ = 1/xⁿ"],["Rational exponent","x^(1/n) is the nth root."]],
+   ideas:[["Apply the rules to variables","",["(2x³)² = 4x⁶","x⁵ · x⁻² = x³","12a⁶ ÷ 4a² = 3a⁴"]],
+          ["Rational exponents are roots","Root first, then power.",["8^(1/3) = 2","16^(3/4) = (⁴√16)³ = 2³ = 8"]]],
+   mistakes:["Forgetting to raise the coefficient: (3x²)³ = 27x⁶.","Reading 16^(3/4) as ¾ of 16."],
+   qs:[{q:"(3x²)³ = ?",o:[opt("27x⁶",1,"3³ = 27 and 2 × 3 = 6."),opt("9x⁵",0,"Cube the 3 and multiply the exponents."),opt("3x⁶",0,"The 3 is cubed too.")]},
+       {q:"x⁵ · x⁻² = ?",o:[opt("x³",1,"5 + (−2) = 3."),opt("x⁻¹⁰",0,"Multiplying adds exponents."),opt("x⁷",0,"5 + (−2) = 3, not 7.")]},
+       {q:"12a⁶ ÷ 4a² = ?",o:[opt("3a⁴",1,"12 ÷ 4 = 3, 6 − 2 = 4."),opt("8a⁴",0,"Divide 12 by 4."),opt("3a³",0,"Subtract exponents: 6 − 2 = 4.")]},
+       {q:"27^(1/3) = ?",o:[opt("3",1,"The cube root of 27."),opt("9",0,"The ⅓ power is a cube root, not ÷ 3."),opt("81",0,"That's 27 × 3.")]},
+       {q:"16^(3/4) = ?",o:[opt("8",1,"⁴√16 = 2, and 2³ = 8."),opt("12",0,"It's not ¾ of 16. Take the 4th root, then cube."),opt("64",0,"That's 16^(3/2).")]}]},
+  {id:"6b",name:"Exponential growth & decay",from:"2027-02-11",to:"2027-02-26",std:"F-LE.A.1c, F-LE.A.2, F-IF.C.8b, F-BF.A.1a",
+   vocab:[["Exponential function","y = a · bˣ"],["Growth factor","b > 1; for r% growth, b = 1 + r."],["Decay factor","0 < b < 1; for r% decay, b = 1 − r."]],
+   ideas:[["Read the model","",["y = 500(1.04)ᵗ → starts at 500, grows 4% a year"]],
+          ["Build a model from a percent","",["$20,000 car loses 15% a year","y = 20,000(0.85)ᵗ"]],
+          ["Linear vs exponential","Constant difference → linear. Constant ratio → exponential.",["3, 6, 12, 24 → ratio 2 → exponential"]]],
+   mistakes:["Using 0.15 instead of 0.85 for 15% decay.","Treating doubling as adding."],
+   qs:[{q:"y = 500(1.04)ᵗ shows…",o:[opt("4% growth per year",1,"b = 1.04 = 1 + 0.04."),opt("4% decay per year",0,"b > 1 means growth."),opt("104% growth per year",0,"1.04 means the original plus 4%.")]},
+       {q:"A $20,000 car loses 15% of its value each year. Which model fits?",o:[opt("y = 20,000(0.85)ᵗ",1,"It keeps 85% each year."),opt("y = 20,000(0.15)ᵗ",0,"It keeps 85%, not 15%."),opt("y = 20,000 − 0.15t",0,"Percent loss each year is exponential, not linear.")]},
+       {q:"50 bacteria double every hour. How many after 4 hours?",o:[opt("800",1,"50 × 2⁴ = 50 × 16."),opt("400",0,"2⁴ = 16, not 8."),opt("250",0,"Doubling multiplies; it doesn't add 50.")]},
+       {q:"x: 0, 1, 2, 3 and y: 3, 6, 12, 24. This is…",o:[opt("Exponential",1,"Each y is 2 times the last."),opt("Linear",0,"Differences 3, 6, 12 aren't constant.")]},
+       {q:"y = 200(0.5)ˣ. Find y when x = 3.",o:[opt("25",1,"200 × 0.125."),opt("100",0,"That's x = 1. Use 0.5³ = 0.125."),opt("300",0,"0.5 shrinks the value.")]}]}]},
+ {n:7,name:"Polynomials & factoring",mp:"MP3",topics:[
+  {id:"7a",name:"Polynomial operations",from:"2027-03-01",to:"2027-03-12",std:"A-APR.A.1, A-SSE.A.1a",
+   vocab:[["Polynomial","A sum of terms like 3x² + 2x − 5."],["Like terms","Same variable and exponent."],["Special products","(a + b)² and (a + b)(a − b)."]],
+   ideas:[["Add and subtract: combine like terms","Distribute the minus sign when subtracting.",["(5x² − 3x) − (2x² − 7x)","= 3x² + 4x"]],
+          ["Multiply every term by every term","",["(x + 4)(x − 3) = x² − 3x + 4x − 12","= x² + x − 12"]],
+          ["Special products","",["(x + 5)² = x² + 10x + 25","(2x − 3)(2x + 3) = 4x² − 9"]]],
+   mistakes:["Writing (x + 5)² as x² + 25.","Not distributing the minus sign."],
+   qs:[{q:"(3x² + 2x − 5) + (x² − 4x + 1) = ?",o:[opt("4x² − 2x − 4",1,"Combine like terms."),opt("4x² + 6x − 4",0,"2x + (−4x) = −2x."),opt("4x⁴ − 2x − 4",0,"Adding doesn't change exponents.")]},
+       {q:"(5x² − 3x) − (2x² − 7x) = ?",o:[opt("3x² + 4x",1,"−3x − (−7x) = 4x."),opt("3x² − 10x",0,"Subtracting −7x adds 7x."),opt("7x² + 4x",0,"Subtract the x² terms: 5 − 2.")]},
+       {q:"(x + 4)(x − 3) = ?",o:[opt("x² + x − 12",1,"−3x + 4x = x."),opt("x² − 12",0,"Include the middle terms."),opt("x² + 7x − 12",0,"−3x + 4x = +x.")]},
+       {q:"(x + 5)² = ?",o:[opt("x² + 10x + 25",1,"x² + 2(5x) + 25."),opt("x² + 25",0,"A squared sum has a middle term."),opt("x² + 5x + 25",0,"The middle term is 2 × 5x.")]},
+       {q:"(2x − 3)(2x + 3) = ?",o:[opt("4x² − 9",1,"Difference of squares."),opt("4x² + 9",0,"−3 × 3 = −9."),opt("4x² − 12x − 9",0,"The middle terms cancel: +6x − 6x.")]}]},
+  {id:"7b",name:"Factoring & solving by factoring",from:"2027-03-15",to:"2027-04-09",std:"A-SSE.A.2, A-REI.B.4b",
+   vocab:[["GCF","Greatest common factor of all terms."],["Trinomial","Three terms: x² + bx + c."],["Zero product property","If ab = 0, then a = 0 or b = 0."]],
+   ideas:[["Pull out the GCF first","",["6x² + 9x = 3x(2x + 3)"]],
+          ["Factor x² + bx + c","Find two numbers that multiply to c and add to b.",["x² + 7x + 12: 3 × 4 = 12, 3 + 4 = 7","(x + 3)(x + 4)"]],
+          ["Solve by setting each factor to 0","",["x² + 2x − 15 = 0","(x + 5)(x − 3) = 0","x = −5 or x = 3"]]],
+   mistakes:["Missing part of the GCF.","Sign errors: x + 5 = 0 gives x = −5."],
+   qs:[{q:"Factor x² + 7x + 12.",o:[opt("(x + 3)(x + 4)",1,"3 × 4 = 12, 3 + 4 = 7."),opt("(x + 6)(x + 2)",0,"6 + 2 = 8, not 7."),opt("(x + 12)(x + 1)",0,"12 + 1 = 13, not 7.")]},
+       {q:"Factor x² − 5x − 14.",o:[opt("(x − 7)(x + 2)",1,"−7 × 2 = −14, −7 + 2 = −5."),opt("(x + 7)(x − 2)",0,"Those add to +5; you need −5."),opt("(x − 14)(x + 1)",0,"−14 + 1 = −13.")]},
+       {q:"Factor 6x² + 9x completely.",o:[opt("3x(2x + 3)",1,"The GCF is 3x."),opt("3(2x² + 3x)",0,"x is common too."),opt("x(6x + 9)",0,"3 is common too.")]},
+       {q:"Solve x² − 9 = 0.",o:[opt("x = 3 or x = −3",1,"(x − 3)(x + 3) = 0."),opt("x = 3 only",0,"(−3)² = 9 too."),opt("x = 9",0,"9² = 81.")]},
+       {q:"Solve x² + 2x − 15 = 0.",o:[opt("x = −5 or x = 3",1,"(x + 5)(x − 3) = 0."),opt("x = 5 or x = −3",0,"x + 5 = 0 gives x = −5."),opt("x = 15",0,"Factor first.")]}]}]},
+ {n:8,name:"Quadratic functions",mp:"MP4",topics:[
+  {id:"8a",name:"Graphing quadratics",from:"2027-04-13",to:"2027-04-23",std:"F-IF.C.7a, F-IF.B.4, F-BF.B.3",
+   vocab:[["Parabola","The U-shaped graph of a quadratic."],["Vertex","The turning point."],["Zeros","Where the graph crosses the x-axis."]],
+   ideas:[["Direction","a > 0 opens up, a < 0 opens down.",["y = −2x² + 3 opens down"]],
+          ["Vertex of y = ax² + bx + c","x = −b ÷ 2a, then plug in.",["y = x² − 6x + 5","x = 3, y = 9 − 18 + 5 = −4","Vertex (3, −4)"]],
+          ["Vertex form","y = (x − h)² + k has vertex (h, k).",["y = (x + 2)² − 5 → (−2, −5)"]]],
+   mistakes:["Sign of h in vertex form.","Forgetting the minus in −b ÷ 2a."],
+   qs:[{q:"Vertex of y = x² − 6x + 5?",o:[opt("(3, −4)",1,"x = 6 ÷ 2 = 3; y = −4."),opt("(−3, 32)",0,"x = −b ÷ 2a = 6 ÷ 2 = 3."),opt("(3, 5)",0,"Plug x = 3 in: 9 − 18 + 5.")]},
+       {q:"Which way does y = −2x² + 3 open?",o:[opt("Down",1,"a = −2 is negative."),opt("Up",0,"A negative a opens down.")]},
+       {q:"Vertex of y = (x + 2)² − 5?",o:[opt("(−2, −5)",1,"x + 2 means h = −2."),opt("(2, −5)",0,"(x − h): x + 2 = x − (−2)."),opt("(−2, 5)",0,"k = −5.")]},
+       {q:"Zeros of y = x² − x − 6?",o:[opt("x = 3 and x = −2",1,"(x − 3)(x + 2)."),opt("x = −3 and x = 2",0,"Those give x² + x − 6."),opt("x = 6",0,"Factor first.")]},
+       {q:"y = x² shifted up 4 is…",o:[opt("y = x² + 4",1,"Adding outside shifts up."),opt("y = (x + 4)²",0,"That shifts left 4."),opt("y = 4x²",0,"That stretches it.")]}]},
+  {id:"8b",name:"Quadratic formula & completing the square",from:"2027-04-26",to:"2027-05-07",std:"A-REI.B.4a, A-REI.B.4b",
+   vocab:[["Quadratic formula","x = (−b ± √(b² − 4ac)) ÷ 2a"],["Discriminant","b² − 4ac: tells how many real solutions."],["Completing the square","Add (b ÷ 2)² to make a perfect square."]],
+   ideas:[["Discriminant","> 0 two, = 0 one, < 0 none.",["x² + 4x + 5: 16 − 20 = −4 → none"]],
+          ["Completing the square","",["x² + 6x = 7","x² + 6x + 9 = 16","(x + 3)² = 16 → x = 1 or −7"]],
+          ["The formula","",["2x² − 3x − 2 = 0","(3 ± √25) ÷ 4 → x = 2 or −½"]]],
+   mistakes:["Using b instead of −b.","Forgetting ± and losing a solution."],
+   qs:[{q:"How many real solutions does x² + 4x + 5 = 0 have?",o:[opt("None",1,"16 − 20 = −4 < 0."),opt("Two",0,"The discriminant is negative."),opt("One",0,"One solution needs a discriminant of 0.")]},
+       {q:"Solve x² + 6x = 7 by completing the square.",o:[opt("x = 1 or x = −7",1,"(x + 3)² = 16, x + 3 = ±4."),opt("x = −1 or x = 7",0,"x + 3 = ±4, so x = 1 or −7."),opt("x = 4 or x = −4",0,"Subtract 3 after taking the root.")]},
+       {q:"Solve 2x² − 3x − 2 = 0.",o:[opt("x = 2 or x = −½",1,"(3 ± 5) ÷ 4."),opt("x = −2 or x = ½",0,"−b is +3 here."),opt("x = 2 or x = ½",0,"(3 − 5) ÷ 4 = −½.")]},
+       {q:"What completes the square for x² + 10x?",o:[opt("25",1,"(10 ÷ 2)²."),opt("100",0,"Halve 10 first, then square."),opt("5",0,"Square the 5.")]},
+       {q:"How many real solutions does x² − 6x + 9 = 0 have?",o:[opt("One",1,"36 − 36 = 0."),opt("Two",0,"Discriminant 0 means one solution."),opt("None",0,"0 is not negative.")]}]}]},
+ {n:9,name:"Square roots & radicals",mp:"MP4",topics:[
+  {id:"9a",name:"Radicals & square root functions",from:"2027-05-10",to:"2027-05-21",std:"F-BF.4a, F-IF.4, A-REI.A.2",
+   vocab:[["Radicand","The number under the root."],["Simplest form","No perfect-square factors under the root."],["Extraneous solution","A result that fails the original equation."]],
+   ideas:[["Simplify with perfect squares","",["√72 = √36 · √2 = 6√2"]],
+          ["Add only like radicals","",["3√5 + 2√5 = 5√5"]],
+          ["Radical equations: square, then check","",["√(x − 2) = 4","x − 2 = 16 → x = 18 ✓"]]],
+   mistakes:["Adding unlike radicals.","Skipping the check for extraneous solutions."],
+   qs:[{q:"Simplify √72.",o:[opt("6√2",1,"√36 · √2."),opt("36√2",0,"√36 = 6."),opt("2√18",0,"Not simplest: 18 has a factor of 9.")]},
+       {q:"3√5 + 2√5 = ?",o:[opt("5√5",1,"Add the coefficients; the radicand stays."),opt("5√10",0,"The radicand stays 5."),opt("6√5",0,"3 + 2 = 5.")]},
+       {q:"Solve √(x − 2) = 4.",o:[opt("x = 18",1,"x − 2 = 16."),opt("x = 6",0,"Square both sides: x − 2 = 16."),opt("x = 4",0,"Square the 4 first.")]},
+       {q:"Simplify 6 ÷ √3.",o:[opt("2√3",1,"6√3 ÷ 3."),opt("2",0,"√3 isn't 3."),opt("6√3",0,"Divide by 3 after multiplying by √3/√3.")]},
+       {q:"Domain of y = √(x + 1)?",o:[opt("x ≥ −1",1,"x + 1 can't be negative."),opt("x ≥ 1",0,"x + 1 ≥ 0 gives x ≥ −1."),opt("All real numbers",0,"No square roots of negatives here.")]}]}]},
+ {n:10,name:"Rational functions",mp:"MP4",topics:[
+  {id:"10a",name:"Inverse variation & rational expressions",from:"2027-05-24",to:"2027-06-04",std:"A.CED.A.1, A.CED.A.2",
+   vocab:[["Inverse variation","xy = k, or y = k ÷ x."],["Excluded value","Makes a denominator 0."],["Asymptote","A line the graph approaches but never touches."]],
+   ideas:[["Inverse variation","Find k = xy, then use it.",["y = 6 when x = 4 → k = 24","x = 8 → y = 3"]],
+          ["Simplify by factoring","",["(x² − 9) ÷ (x + 3)","= (x + 3)(x − 3) ÷ (x + 3) = x − 3, x ≠ −3"]],
+          ["Same denominator: add the tops","",["2/x + 3/x = 5/x"]]],
+   mistakes:["Canceling terms instead of factors.","Adding denominators."],
+   qs:[{q:"y varies inversely with x; y = 6 when x = 4. Find y when x = 8.",o:[opt("3",1,"k = 24, so y = 24 ÷ 8."),opt("12",0,"That's direct variation."),opt("10",0,"Inverse variation: xy stays 24.")]},
+       {q:"Simplify (x² − 9) ÷ (x + 3).",o:[opt("x − 3",1,"Factor: (x + 3)(x − 3)."),opt("x − 9",0,"Factor first; you can't cancel terms."),opt("x² − 3",0,"Factor the numerator first.")]},
+       {q:"Excluded value of 5 ÷ (x − 2)?",o:[opt("x = 2",1,"x − 2 = 0."),opt("x = −2",0,"Set x − 2 = 0."),opt("x = 5",0,"Only the denominator matters.")]},
+       {q:"2/x + 3/x = ?",o:[opt("5/x",1,"Same denominator: add the tops."),opt("5/(2x)",0,"Don't add the denominators."),opt("6/x²",0,"Adding isn't multiplying.")]},
+       {q:"Vertical asymptote of y = 1 ÷ (x + 4)?",o:[opt("x = −4",1,"x + 4 = 0."),opt("x = 4",0,"Set x + 4 = 0."),opt("y = 0",0,"That's the horizontal asymptote.")]}]}]},
+ {n:11,name:"Special functions & probability",mp:"MP4 · time permitting",topics:[
+  {id:"11a",name:"Lines of fit, piecewise & probability",from:"2027-06-07",to:"2027-06-16",std:"S.ID.B.6, S.ID.C.8, F-IF.C.7b",
+   vocab:[["Correlation coefficient r","From −1 to 1: strength and direction of a linear pattern."],["Piecewise function","Different rules on different intervals."],["Independent events","One doesn't affect the other: multiply probabilities."]],
+   ideas:[["Read r","Close to ±1 is strong; sign gives direction.",["r = −0.92 → strong negative"]],
+          ["Evaluate a piecewise function","Pick the rule whose interval contains x.",["f(x) = x + 1 if x < 0; 2x if x ≥ 0","f(3) = 6"]],
+          ["Counting and probability","",["Arrange 4 books: 4! = 24","P(6 and heads) = 1/6 × 1/2 = 1/12"]]],
+   mistakes:["Using the wrong piece of a piecewise function.","Adding probabilities of independent events."],
+   qs:[{q:"r = −0.92 means…",o:[opt("A strong negative linear relationship",1,"Close to −1."),opt("A weak positive relationship",0,"The sign is negative and 0.92 is strong."),opt("No relationship",0,"That's r near 0.")]},
+       {q:"f(x) = |x − 3|. What is f(1)?",o:[opt("2",1,"|−2| = 2."),opt("−2",0,"Absolute value is never negative."),opt("4",0,"1 − 3 = −2, so |−2| = 2.")]},
+       {q:"f(x) = x + 1 if x < 0, 2x if x ≥ 0. What is f(3)?",o:[opt("6",1,"3 ≥ 0, so use 2x."),opt("4",0,"3 is not less than 0; use 2x."),opt("3",0,"Apply the rule: 2 × 3.")]},
+       {q:"How many ways can you arrange 4 books on a shelf?",o:[opt("24",1,"4 × 3 × 2 × 1."),opt("16",0,"That's 4 × 4."),opt("10",0,"That's 4 + 3 + 2 + 1.")]},
+       {q:"Probability of rolling a 6 and flipping heads?",o:[opt("1/12",1,"1/6 × 1/2."),opt("2/3",0,"Independent events multiply, not add."),opt("1/8",0,"1/6 × 1/2 = 1/12.")]}]}]}
+ ]};
+
+MATH6.sourceUrl="https://files-backend.assets.thrillshare.com/documents/asset/uploaded_file/4500/Eps/8d4dd186-b67c-4960-9dd6-81a4436d4fab/Math_6.pdf?disposition=inline";
+const COURSES={alg1:Object.assign(ALG1,{label:"Algebra I",prefix:"a1",tag:"Grade 8 · Algebra I"}),math8:Object.assign(MATH8,{label:"Math 8",prefix:"m8",tag:"Grade 8 · on-level"}),math6:Object.assign(MATH6,{label:"Math 6",prefix:"m6",tag:"Grade 6 · refresher for gaps"})};
+Object.entries(COURSES).forEach(([cid,c])=>{c.topics=c.units.flatMap(u=>u.topics.map(t=>({...t,key:c.prefix+"-"+t.id,courseId:cid,course:c.label,unit:u.n,unitName:u.name,mp:u.mp})));c.topics.forEach(t=>{QUIZZES[t.key]={title:t.name+" practice",skill:"A",qs:t.qs}})});
+const ALLTOPICS=Object.values(COURSES).flatMap(c=>c.topics);
+
+/* ---------------- state ---------------- */
+const S = {view:"teacher",db:null,dbState:"loading",students:[],tasks:[],attempts:[],activity:[],settings:null,open:null,as:"",libSkill:"A",quiz:null,loadedAt:new Date().toISOString()};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pct=(a,b)=>b?Math.round(100*a/b):0;
+const tone=v=>v==null?"none":v>=80?"good":v>=70?"warn":"bad";
+const first=n=>String(n||"").split(" ")[0];
+const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString("en-US",{month:"short",day:"numeric"})}catch(e){return ""}};
+const STATUS=[["not-started","Not started"],["on-track","On track"],["needs-help","Needs more help"],["goal-met","Goal met"]];
+function curWeek(){const st=S.settings&&S.settings.start;if(!st)return 1;const d=(Date.now()-new Date(st+"T00:00:00").getTime())/864e5;return Math.max(1,Math.min(6,Math.floor(d/7)+1))}
+function toast(m){const t=$("#toast");t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2400)}
+const tasksFor=id=>S.tasks.filter(t=>t.student===id).sort((a,b)=>(a.week||0)-(b.week||0)||String(a.id).localeCompare(String(b.id)));
+const attemptsFor=id=>S.attempts.filter(a=>a.student===id).sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+function lastActivity(id){const a=attemptsFor(id)[0];const t=S.tasks.filter(x=>x.student===id&&x.kind!=="teacher"&&x.doneAt).map(x=>x.doneAt).sort().pop();return [a&&a.at,t].filter(Boolean).sort().pop()||null}
+function daysIn(){const st=S.settings&&S.settings.start;return st?(Date.now()-new Date(st+"T00:00:00").getTime())/864e5:0}
+function flags(st){const out=[];const w=curWeek();
+  const act0=lastActivity(st.id),hasOpen=tasksFor(st.id).some(t=>t.kind!=="teacher"&&!t.done);if(hasOpen&&st.status!=="goal-met"&&daysIn()>=3&&(!act0||Date.now()-new Date(act0).getTime()>5*864e5))out.push(act0?"No activity in 5+ days":"No activity yet");const over=tasksFor(st.id).filter(t=>!t.done&&(t.week||1)<w).length;if(over)out.push(over+" overdue");const la=attemptsFor(st.id)[0];if(la&&la.pct<70)out.push("Last check "+la.pct+"%");if(st.status==="needs-help")out.push("Flagged");return out}
+
+/* ---------------- db wiring ---------------- */
+async function initDb(){
+  let db=null;try{db=window.claude&&window.claude.use?await window.claude.use("db"):null}catch(e){db=null}
+  S.db=db;
+  if(!db){S.dbState="off";note();render();return}
+  S.dbState="on";note();
+  const err=e=>{if(e&&e.code==="revoked"){S.dbState="off";note()}};
+  db.collection("students").onSnapshot(s=>{S.students=s.docs.map(d=>({id:d.id,...d.data()}));if(!S.as&&S.students.length)S.as=S.students[0].id;render()},err);
+  db.collection("tasks").onSnapshot(s=>{S.tasks=s.docs.map(d=>({id:d.id,...d.data()}));render()},err);
+  db.collection("attempts").onSnapshot(s=>{S.attempts=s.docs.map(d=>({id:d.id,...d.data()}));render()},err);
+  db.doc("program/settings").onSnapshot(d=>{S.settings=d.exists?d.data():null;render()},err);
+  db.collection("activity").onSnapshot(s=>{S.activity=s.docs.map(d=>({id:d.id,...d.data()}));render()},err);
+}
+/* Activity log: every change is recorded so the next visit can show what happened. */
+function act(db,who,student,kind,text){return db.collection("activity").add({who,student,kind,text,at:new Date().toISOString()}).catch(()=>{})}
+const nameOf=id=>{if(id==="class")return "Class";const s=S.students.find(x=>x.id===id);return s?s.name:id};
+function course(){const k=S.settings&&S.settings.course;return COURSES[k]||COURSES.alg1}
+function curTopic(){const c=course(),ov=S.settings&&S.settings.topic;if(ov){const t=c.topics.find(x=>x.key===ov);if(t)return t}
+  const today=new Date().toLocaleDateString("en-CA");let t=c.topics.find(x=>today>=x.from&&today<=x.to);if(t)return t;
+  return c.topics.find(x=>x.from>today)||c.topics[c.topics.length-1]}
+function nextTopic(t){const c=COURSES[t.courseId];const i=c.topics.indexOf(t);return c.topics[i+1]||null}
+const md=d=>new Date(d+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
+const rng=t=>md(t.from)+" – "+md(t.to);
+function mathPanel(){const c=course(),t=curTopic(),nx=nextTopic(t),ov=!!(S.settings&&S.settings.topic&&c.topics.some(x=>x.key===S.settings.topic));
+  return `<div class="panel mathp"><div class="panel-h"><h3>${c.label} right now</h3><span class="eyebrow">${ov?"Set by you":"Estimated pacing"}</span></div><div class="panel-b">
+  <div class="eyebrow">Unit ${t.unit} · ${esc(t.unitName)}</div><h4>${esc(t.name)}</h4><div class="when">${rng(t)} · ${esc(t.std)}</div>
+  <div class="btns"><button class="btn small" data-guide="${t.key}">Study guide</button><button class="btn small primary" data-assign="${t.key}">Assign practice to all</button></div>
+  ${nx?`<div class="next">Next: <b>${esc(nx.name)}</b> from ${md(nx.from)}</div>`:""}
+  <div class="two-sel"><div><label class="eyebrow" for="coursesel">Course</label><select id="coursesel" class="status">${Object.entries(COURSES).map(([k,x])=>`<option value="${k}"${x===c?" selected":""}>${x.label}</option>`).join("")}</select></div>
+  <div><label class="eyebrow" for="topicsel">Our class is on</label><select id="topicsel" class="status"><option value="">Follow estimated pacing</option>${c.topics.map(x=>`<option value="${x.key}"${S.settings&&S.settings.topic===x.key?" selected":""}>${x.id} · ${esc(x.name)}</option>`).join("")}</select></div></div></div></div>`}
+function mathCard(){const c=course(),t=curTopic(),nx=nextTopic(t),qid=t.key;const best=attemptsFor(S.as).filter(a=>a.quiz===qid).sort((a,b)=>b.pct-a.pct)[0];
+  return `<h3 class="sub">${c.label} this unit</h3><div class="mathnow"><div><div class="eyebrow">Unit ${t.unit} · ${esc(t.unitName)} · ${rng(t)}</div><h4>${esc(t.name)}</h4><p>Read the study guide (about 5 minutes), then try 5 practice questions.${best?` Your best so far: ${best.pct}%.`:""}</p></div><div class="btns"><button class="btn" data-guide="${t.key}">Study guide</button><button class="btn primary" data-start="${qid}">Practice</button></div></div>${nx?`<p class="next">Coming next: <b>${esc(nx.name)}</b>, from ${md(nx.from)}. <a href="#" data-guide="${nx.key}">Preview the guide</a></p>`:""}`}
+function renderGuide(){const t=ALLTOPICS.find(x=>x.key===S.guide);if(!t)return;
+  $("#overlay").innerHTML=`<div class="quiz" role="dialog" aria-modal="true" aria-label="${esc(t.name)} study guide"><div class="quiz-in guide">
+  <div class="quiz-top"><div><div class="t">Study guide</div><div class="p">${esc(t.course)} · Unit ${t.unit} · ${esc(t.std)}</div></div><button class="x" data-gclose aria-label="Close">×</button></div>
+  <h2>${esc(t.name)}</h2><p class="lead">${esc(t.unitName)} · ${rng(t)}</p>
+  <div class="sec"><h3>Words to know</h3><dl class="vocab">${t.vocab.map(([a,b])=>`<dt>${esc(a)}</dt><dd>${esc(b)}</dd>`).join("")}</dl></div>
+  ${t.ideas.map(([h,x,ex])=>`<div class="sec"><h3>${esc(h)}</h3>${x?`<p>${esc(x)}</p>`:""}<pre class="ex">${ex.map(esc).join("\n")}</pre></div>`).join("")}
+  <div class="sec warn"><h3>Watch out for</h3><ul class="mist">${t.mistakes.map(m=>`<li>${esc(m)}</li>`).join("")}</ul></div>
+  <div class="quiz-foot"><span style="color:var(--muted);margin-right:auto;align-self:center">5 questions · feedback on every answer</span><button class="btn primary" data-start="${t.key}">Start practice</button></div></div></div>`}
+function mathPlanBody(){const c=COURSES[S.libCourse]||course(),cur=c===course()?curTopic():null;
+  return `<div class="seg" style="display:inline-flex;margin-bottom:14px">${Object.entries(COURSES).map(([k,x])=>`<button data-libcourse="${k}" aria-pressed="${x===c}">${x.label}</button>`).join("")}</div>
+  <div class="eyebrow">${esc(c.tag)} · 2026–27</div><h2>${c.label} year plan</h2><p class="lead">${c.topics.length} topics in ${c.units.length} units, each with a study guide and 5 practice questions.${cur?" The highlighted topic is where the class is now.":""} ${esc(c.note)}</p>
+  ${c.units.map(u=>`<div class="sec"><h3>Unit ${u.n} · ${esc(u.name)} <span class="eyebrow">${u.mp}</span></h3>${c.topics.filter(t=>t.unit===u.n).map(t=>`<div class="topic${cur&&t.key===cur.key?" cur":""}"><div class="tn"><b>${esc(t.name)}</b>${cur&&t.key===cur.key?' <span class="chip">Now</span>':""}<div class="meta">${rng(t)} · ${esc(t.std)}</div></div><div class="btns"><button class="btn small" data-guide="${t.key}">Guide</button><button class="btn small" data-start="${t.key}" data-preview-mode="1">Practice</button></div></div>`).join("")}</div>`).join("")}
+  <p class="lead" style="font-size:13px">Source: <a href="${c.sourceUrl}" target="_blank" rel="noopener">${esc(c.source)}</a></p>`}
+const dayLabel=iso=>{try{return new Date(iso).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}catch(e){return ""}};
+function lastSession(){
+  const t=S.activity.filter(a=>a.who==="teacher"&&a.at<S.loadedAt).sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+  if(!t.length)return null;
+  const day=new Date(t[0].at).toDateString();
+  const seen=new Set(),items=[];
+  for(const a of t){if(new Date(a.at).toDateString()!==day)break;const k=(a.kind==="status"||a.kind==="notes")?a.kind+":"+a.student:a.id;if(seen.has(k))continue;seen.add(k);items.push(a)}
+  return {at:t[0].at,items:items.reverse()};
+}
+function newSince(ls){return S.activity.filter(a=>a.who==="student"&&(!ls||a.at>ls.at)).sort((a,b)=>String(b.at).localeCompare(String(a.at)))}
+function renderSince(){
+  const ls=lastSession();
+  if(!ls)return S.activity.length||S.dbState!=="on"?"":`<div class="panel since"><div class="panel-h"><h3>Since your last visit</h3></div><div class="empty" style="padding:16px">Everything you change today will be listed here next time you open the app.</div></div>`;
+  const nw=newSince(ls);
+  const li=a=>`<li><b>${esc(first(nameOf(a.student)))}</b> <span>${esc(a.text)}</span><time>${esc(a.who==="student"?dayLabel(a.at):"")}</time></li>`;
+  return `<div class="panel since"><div class="panel-h"><h3>Since your last visit</h3><span class="eyebrow">Your last changes · ${esc(dayLabel(ls.at))}</span></div>
+  <div class="since-b"><div><h4>What you updated</h4><ul>${ls.items.map(li).join("")}</ul></div>
+  <div><h4>New from students <span class="cnt">${nw.length}</span></h4>${nw.length?`<ul>${nw.slice(0,5).map(li).join("")}</ul>${nw.length>5?`<div class="more">and ${nw.length-5} more</div>`:""}`:'<div class="more">No student activity yet.</div>'}</div></div></div>`;
+}
+function note(){const n=$("#dbnote");if(S.dbState==="off"){n.hidden=false;n.innerHTML="<b>Progress tracking is off in this view.</b> Sign in on claude.ai to see plans and save progress. The toolkit and every check still work here.";}else n.hidden=true}
+async function write(fn,okMsg){if(!S.db){toast("Sign in to save progress");return false}try{await fn(S.db);if(okMsg)toast(okMsg);return true}catch(e){toast(e&&e.code==="invalid_argument"?"You can view this plan but not change it":"Couldn't save. Try again.");return false}}
+
+/* ---------------- teacher view ---------------- */
+function renderTeacher(){
+  const el=$("#teacher");const w=curWeek();
+  const total=S.tasks.length,done=S.tasks.filter(t=>t.done).length;
+  const wk=Date.now()-7*864e5;const recent=S.attempts.filter(a=>new Date(a.at).getTime()>wk).length;
+  const attn=S.students.filter(s=>flags(s).length).length;
+  const ls=lastSession(),nw=newSince(ls);const newCount=id=>ls?nw.filter(a=>a.student===id).length:0;
+  const sorted=[...S.students].sort((a,b)=>flags(b).length-flags(a).length||String(a.name).localeCompare(String(b.name)));
+  const rows=sorted.map(st=>{
+    const ts=tasksFor(st.id),d=ts.filter(t=>t.done).length,la=attemptsFor(st.id)[0],fl=flags(st);
+    return `<div class="row">
+      <div class="who"><button class="name" data-open="${esc(st.id)}">${esc(st.name)}</button>
+        <div class="sum">${esc(st.summary)}</div>
+        <div class="chips">${(st.focus||[]).map(k=>`<span class="chip"><span class="code">${k}</span>${esc(SKILLS[k]?SKILLS[k].short:k)}</span>`).join("")}${fl.map(f=>`<span class="flag">${esc(f)}</span>`).join("")}${newCount(st.id)?`<span class="chip new">${newCount(st.id)} new</span>`:""}</div></div>
+      <div class="prog"><div class="t"><span>Tasks</span><span>${d}/${ts.length}</span></div><div class="meter"><i style="width:${pct(d,ts.length)}%"></i></div></div>
+      <div>${la?`<span class="score ${tone(la.pct)}">${la.pct}%</span><span class="score-l">${esc(QUIZZES[la.quiz]?QUIZZES[la.quiz].title:la.quiz)}</span>`:`<span class="score none">—</span><span class="score-l">No check yet</span>`}</div>
+      <div><label class="eyebrow" for="st-${esc(st.id)}" style="display:block;margin-bottom:2px">Status</label><select class="status" id="st-${esc(st.id)}" data-status="${esc(st.id)}" data-v="${esc(st.status||"not-started")}">${STATUS.map(([v,l])=>`<option value="${v}"${(st.status||"not-started")===v?" selected":""}>${l}</option>`).join("")}</select></div>
+    </div>`}).join("");
+  const groups=Object.entries(SKILLS).map(([k,sk])=>{const who=S.students.filter(s=>(s.focus||[]).includes(k));if(!who.length)return"";
+    return `<div class="group"><div class="group-top"><h4><span class="chip code">${k}</span> ${esc(sk.short)}</h4><span class="when">${esc(sk.time)}</span></div>
+    <div class="names">${who.map(s=>esc(first(s.name))).join(", ")}</div>
+    <button class="btn small" data-lib="${k}">Open lesson & materials</button></div>`}).join("");
+  el.innerHTML=`<div class="page-head"><div><div class="eyebrow">Week ${w} of 6</div><h2>Support plans</h2><p>Every action and check result for each student, updated live as students work. Tap a name for their full plan and a ready-to-send parent update.</p></div></div>
+  <div class="stats">
+    <div class="stat"><div class="n">${S.students.length}</div><div class="l">Students on a plan</div></div>
+    <div class="stat"><div class="n">${pct(done,total)}%</div><div class="l">Tasks done (${done} of ${total})</div></div>
+    <div class="stat"><div class="n">${recent}</div><div class="l">Checks taken in 7 days</div></div>
+    <div class="stat${attn?" alert":""}"><div class="n">${attn}</div><div class="l">Need attention</div></div>
+  </div>
+  ${renderSince()}
+  <div class="cols">
+    <div class="panel"><div class="panel-h"><h3>Students</h3><span class="eyebrow">Needs attention first</span></div><div class="panel-b">${rows||emptyStudents()}</div></div>
+    <div>${mathPanel()}<div class="panel"><div class="panel-h"><h3>Small groups</h3></div><div class="panel-b">${groups||'<div class="empty">Groups appear when plans are added.</div>'}</div></div></div>
+  </div>`;
+}
+function emptyStudents(){return S.dbState==="loading"?'<div class="empty">Loading plans…</div>':'<div class="empty"><b>No plans yet</b>Plans appear here once students are added to the program.</div>'}
+
+function parentMsg(st){
+  const ts=tasksFor(st.id).filter(t=>t.kind==="student"),d=ts.filter(t=>t.done),open=ts.filter(t=>!t.done);
+  const la=attemptsFor(st.id)[0];const miss=open.filter(t=>t.skill==="E");
+  let m=`Hello, here is an update on ${first(st.name)}'s learning plan.\n\n`;
+  m+=`${first(st.name)} has finished ${d.length} of ${ts.length} tasks so far`+(d.length?` (${d.slice(0,3).map(t=>t.title).join("; ")}).`:".")+"\n";
+  if(la)m+=`Latest check: ${QUIZZES[la.quiz]?QUIZZES[la.quiz].title:la.quiz}, ${la.pct}%.\n`;
+  if(miss.length)m+=`Still missing: ${miss.map(t=>t.title.replace(/^Turn in /,"")).join("; ")}.\n`;
+  const next=open.filter(t=>t.skill!=="E").slice(0,2);if(next.length)m+=`Coming up: ${next.map(t=>t.title).join("; ")}.\n`;
+  const home=[...new Set((st.focus||[]).map(k=>SKILLS[k]&&SKILLS[k].home).filter(Boolean))][0];if(home)m+=`How you can help at home: ${home}\n`;
+  m+=`\nThank you for your support. Please reply with any questions.`;return m;
+}
+function renderDrawer(){
+  const ov=$("#overlay");if(!S.open){if(!S.quiz)ov.innerHTML="";return}
+  const st=S.students.find(s=>s.id===S.open);if(!st){S.open=null;ov.innerHTML="";return}
+  const w=curWeek();const ts=tasksFor(st.id);
+  const taskRow=t=>`<div class="task${t.done?" done":""}"><input type="checkbox" id="t-${esc(t.id)}" data-task="${esc(t.id)}"${t.done?" checked":""}><label for="t-${esc(t.id)}"><span class="tt">${esc(t.title)}</span><div class="meta">Week ${t.week||1} · ${t.minutes||5} min · ${t.skill}${!t.done&&(t.week||1)<w?' · <span class="overdue">overdue</span>':""}${t.done&&t.doneAt?" · done "+fmtDate(t.doneAt):""}</div></label>${t.type!=="todo"&&QUIZZES[t.ref]?`<button class="btn ghost small" data-preview="${esc(t.ref)}">View</button>`:""}</div>`;
+  const tt=ts.filter(t=>t.kind==="teacher"),sts=ts.filter(t=>t.kind!=="teacher");
+  const atts=attemptsFor(st.id);
+  const addOpts=(st.focus||[]).map(k=>{const sk=SKILLS[k];const o=[];["check","practice","extra"].forEach(f=>{if(sk[f])o.push(`<option value="q:${k}:${sk[f]}">${k} · ${esc(QUIZZES[sk[f]].title)}</option>`)});(sk.todos||[]).forEach((x,i)=>o.push(`<option value="t:${k}:${i}">${k} · ${esc(x)}</option>`));return o.join("")}).join("");
+  ov.innerHTML=`<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(st.name)} plan">
+    <div class="drawer-h"><div><div class="eyebrow">Support plan</div><h2>${esc(st.name)}</h2></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="sec"><div class="grid4">${SUBJECTS.map(s=>{const v=st.baseline&&st.baseline[s];return `<div class="subj"><span class="score ${tone(v)}">${v!=null?v+"%":"—"}</span><small>${esc(s)}</small></div>`}).join("")}</div>
+      <dl class="kv"><dt>Why</dt><dd>${esc(st.summary)}</dd><dt>Week 6 target</dt><dd>${esc(st.target)}</dd>${st.helper?`<dt>Peer helper</dt><dd>${esc(st.helper)}</dd>`:""}</dl></div>
+    <div class="sec"><h3>Teacher actions</h3>${tt.map(taskRow).join("")||'<div class="empty">None</div>'}</div>
+    <div class="sec"><h3>Student tasks <span class="eyebrow">${sts.filter(t=>t.done).length}/${sts.length} done</span></h3>${sts.map(taskRow).join("")||'<div class="empty">None</div>'}
+      <div class="add"><select id="addsel" aria-label="Task to add"><option value="">Add a task from the toolkit…</option>${addOpts}</select><select id="addwk" aria-label="Week">${[1,2,3,4,5,6].map(n=>`<option value="${n}"${n===w?" selected":""}>Week ${n}</option>`).join("")}</select><button class="btn primary" data-add="${esc(st.id)}">Add</button></div></div>
+    <div class="sec"><h3>Check results</h3>${atts.map(a=>`<div class="att"><div><b>${esc(QUIZZES[a.quiz]?QUIZZES[a.quiz].title:a.quiz)}</b><div class="miss">${fmtDate(a.at)}${a.missed&&a.missed.length?" · missed: "+a.missed.map(i=>esc((QUIZZES[a.quiz]&&QUIZZES[a.quiz].qs[i]?QUIZZES[a.quiz].qs[i].q:"")).slice(0,48)).join(" | "):" · no mistakes"}</div></div><span class="score ${tone(a.pct)}">${a.pct}%</span></div>`).join("")||'<div class="empty">No checks taken yet. Results appear here the moment the student finishes one.</div>'}</div>
+    <div class="sec"><h3><label for="notes">Teacher notes</label></h3><textarea id="notes" data-notes="${esc(st.id)}" placeholder="What you noticed this week">${esc(st.notes||"")}</textarea></div>
+    <div class="sec"><h3>Parent update <button class="btn small" data-copy="pm">Copy</button></h3><textarea id="pm" readonly>${esc(parentMsg(st))}</textarea></div>
+  </aside>`;
+}
+
+/* ---------------- student view ---------------- */
+function renderStudent(){
+  const el=$("#student");
+  if(!S.students.length){el.innerHTML=`<div class="page-head"><div><h2>My plan</h2><p>Each student sees their own tasks here, with practice that checks answers instantly.</p></div></div><div class="panel">${emptyStudents()}</div>`+libPicks(["A","B","C","D"]);return}
+  const st=S.students.find(s=>s.id===S.as)||S.students[0];S.as=st.id;
+  const ts=tasksFor(st.id).filter(t=>t.kind!=="teacher");const d=ts.filter(t=>t.done).length;const open=ts.filter(t=>!t.done);const w=curWeek();
+  const p=pct(d,ts.length),C=2*Math.PI*42;
+  const card=(t,i)=>{const q=QUIZZES[t.ref];return `<div class="card${i===0?" next":""}"><div class="eyebrow">${i===0?"Next up":"Week "+(t.week||1)}${(t.week||1)<w?' · <span class="overdue">overdue</span>':""}</div><h4>${esc(t.title)}</h4><div class="meta">${t.minutes||5} min · ${esc(SKILLS[t.skill]?SKILLS[t.skill].short:"")}${q?" · "+q.qs.length+" questions":""}</div>
+    <div class="go">${q?`<button class="btn primary" data-start="${esc(t.ref)}" data-taskid="${esc(t.id)}">Start</button>`:`<button class="btn" data-done="${esc(t.id)}">Mark done</button>`}</div></div>`};
+  el.innerHTML=`<div class="as" style="margin-bottom:12px"><label class="eyebrow" for="as">Viewing as</label><select id="as">${S.students.map(s=>`<option value="${esc(s.id)}"${s.id===st.id?" selected":""}>${esc(s.name)}</option>`).join("")}</select><span style="color:var(--muted);font-size:13px">In a pilot, each student signs in and sees only their own plan.</span></div>
+  <div class="hello"><div><div class="eyebrow">Week ${w} of 6</div><h2>Hi ${esc(first(st.name))}</h2><p>${open.length?`${open.length} task${open.length>1?"s":""} to go. Start with the first card, it takes about ${open[0].minutes||5} minutes.`:"All tasks done. Nice work."}${st.helper?` Your study partner is ${esc(st.helper)}.`:""}</p></div>
+  <div class="ring" role="img" aria-label="${p}% of tasks done"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="42" fill="none" stroke="var(--sunk)" stroke-width="10"/><circle cx="48" cy="48" r="42" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-p/100)}"/></svg><b>${d}/${ts.length}</b></div></div>
+  <div class="cards">${open.map(card).join("")||'<div class="empty"><b>Nothing left to do</b>Your teacher will add the next step.</div>'}</div>
+  ${mathCard()}
+  ${ts.filter(t=>t.done).length?`<h3 class="sub">Done</h3><div class="cards">${ts.filter(t=>t.done).map(t=>`<div class="card"><div class="eyebrow">Done ${t.doneAt?fmtDate(t.doneAt):""}</div><h4>${esc(t.title)}</h4>${QUIZZES[t.ref]?`<div class="go"><button class="btn" data-start="${esc(t.ref)}">Practice again</button></div>`:""}</div>`).join("")}</div>`:""}
+  ${libPicks(st.focus||[])}`;
+}
+function libPicks(focus){const links=focus.flatMap(k=>SKILLS[k]?SKILLS[k].res:[]);const prac=focus.filter(k=>SKILLS[k]&&SKILLS[k].practice);
+  return `<h3 class="sub">Practice anytime</h3><div class="res">${prac.map(k=>`<a href="#" data-start="${SKILLS[k].practice}">${esc(QUIZZES[SKILLS[k].practice].title)}</a>`).join("")}${links.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener">${esc(n)} ↗</a>`).join("")}</div>`}
+
+/* ---------------- library view ---------------- */
+function keyList(id){const qz=QUIZZES[id];return `<ol class="key">${qz.qs.map(q=>{const ok=q.o.find(o=>o.ok);return `<li>${esc(q.q)}<span class="ok">${esc(ok.t)}</span>${q.o.filter(o=>!o.ok).map(o=>`<span class="mis">If “${esc(o.t)}”: ${esc(o.why)}</span>`).join("")}</li>`}).join("")}</ol>`}
+function renderLibrary(){
+  const k=S.libSkill,sk=SKILLS[k]||SKILLS.A;const who=S.students.filter(s=>(s.focus||[]).includes(k));
+  const quizBlock=(id,label)=>!id?"":`<div class="sec"><h3>${label} <button class="btn small" data-start="${id}" data-preview-mode="1">Try it</button></h3><div style="color:var(--muted);font-size:14px">${esc(QUIZZES[id].title)} · ${QUIZZES[id].qs.length} questions · auto-graded</div><details><summary>Answer key & common mistakes</summary>${keyList(id)}</details></div>`;
+  $("#library").innerHTML=`<div class="page-head"><div><h2>Toolkit</h2><p>Everything a teacher needs for each weak skill: a timed lesson script, an auto-graded check, practice with feedback on every wrong answer, and links for home.</p></div></div>
+  <div class="lib"><nav class="lib-nav" aria-label="Skills"><button data-skill="M" aria-current="${k==="M"}"><span class="code">M</span><span class="nm">Math year plan</span></button>${Object.entries(SKILLS).map(([c,s])=>`<button data-skill="${c}" aria-current="${c===k}"><span class="code">${c}</span><span class="nm">${esc(s.name)}</span></button>`).join("")}</nav>
+  <div class="lib-body">${k==="M"?mathPlanBody():`<div class="eyebrow">${esc(sk.subject)} · ${esc(sk.time)}</div><h2>${esc(sk.name)}</h2><p class="lead">${esc(sk.signal)}${who.length?` For: ${who.map(s=>esc(s.name)).join(", ")}.`:""}</p>
+  <div class="sec"><h3>Lesson script</h3><ol class="script">${sk.lesson.map(([t,x])=>`<li><span class="tm">${esc(t)}</span><span>${esc(x)}</span></li>`).join("")}</ol>${sk.lesson2?`<details><summary>Part 2: ratios & decimals</summary><ol class="script">${sk.lesson2.map(([t,x])=>`<li><span class="tm">${esc(t)}</span><span>${esc(x)}</span></li>`).join("")}</ol></details>`:""}</div>
+  <div class="two">${quizBlock(sk.check,"5-minute check")}${quizBlock(sk.practice,"Practice set")}</div>${quizBlock(sk.extra,"Part 2 check")}
+  <div class="sec"><h3>At home</h3><div>${esc(sk.home)}</div>${sk.res.length?`<div class="res" style="margin-top:10px">${sk.res.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener">${esc(n)} ↗</a>`).join("")}</div>`:""}</div>
+  <div class="sec"><h3>Done when</h3><div>${esc(sk.done)}</div></div>`}</div></div>`;
+}
+
+/* ---------------- quiz runner ---------------- */
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function startQuiz(id,taskId,preview){const qz=QUIZZES[id];if(!qz)return;S.quiz={id,taskId:taskId||null,preview:!!preview||S.view==="library"||S.view==="teacher",i:0,picked:null,results:[],order:qz.qs.map(q=>shuffle(q.o))};renderQuiz()}
+function renderQuiz(){
+  const ov=$("#overlay");const z=S.quiz;if(!z){renderDrawer();return}
+  const qz=QUIZZES[z.id];const st=S.students.find(s=>s.id===S.as);
+  const steps=qz.qs.map((_,i)=>`<i class="${i<z.results.length?(z.results[i]?"ok":"no"):i===z.i?"cur":""}"></i>`).join("");
+  let body;
+  if(z.i>=qz.qs.length){const sc=z.results.filter(Boolean).length,p=pct(sc,qz.qs.length);const missed=z.results.map((r,i)=>r?null:i).filter(i=>i!==null);
+    body=`<div class="result"><div class="eyebrow">${esc(qz.title)}</div><div class="big">${p}%</div><p>${sc} of ${qz.qs.length} correct.${p>=80?" Goal met for this check.":p>=70?" Close. One more practice round should do it.":" Your teacher will go over these with you."}</p></div>
+    ${missed.length?`<div class="sec"><h3>Review</h3>${missed.map(i=>{const q=qz.qs[i];return `<div class="att"><div><b>${esc(q.q)}</b><div class="miss">Answer: ${esc(q.o.find(o=>o.ok).t)} — ${esc(q.o.find(o=>o.ok).why)}</div></div></div>`}).join("")}</div>`:""}
+    <div class="quiz-foot">${z.preview?'<span style="color:var(--muted);margin-right:auto;align-self:center">Preview: not saved</span>':`<span style="color:var(--muted);margin-right:auto;align-self:center">${z.saved?"Saved. Your teacher can see this.":"Saving…"}</span>`}<button class="btn primary" data-qclose>Done</button></div>`;
+    if(!z.preview&&!z.saving&&!z.saved&&st)saveAttempt(st,qz,sc,p,missed);
+  } else {
+    const q=qz.qs[z.i],opts=z.order[z.i];const ans=z.picked!=null;
+    body=`${qz.passage?`<div class="passage">${esc(qz.passage)}${qz.cite?`<cite>${esc(qz.cite)}</cite>`:""}</div>`:""}
+    <div class="qtext">${esc(q.q)}</div><div class="opts">${opts.map((o,j)=>`<button class="opt${ans&&o.ok?" ok":""}${ans&&z.picked===j&&!o.ok?" no":""}" data-pick="${j}"${ans?" disabled":""}>${esc(o.t)}</button>`).join("")}</div>
+    ${ans?(()=>{const p=opts[z.picked];const ok=opts.find(o=>o.ok);return p.ok?`<div class="fb ok"><b>Correct</b><span>${esc(p.why)}</span></div>`:`<div class="fb no"><b>Not quite</b><span>${esc(p.why)} The answer is ${esc(ok.t)}.</span></div>`})():""}
+    <div class="quiz-foot">${ans?`<button class="btn primary" data-next>${z.i===qz.qs.length-1?"See score":"Next"}</button>`:""}</div>`;
+  }
+  ov.innerHTML=`<div class="quiz" role="dialog" aria-modal="true" aria-label="${esc(qz.title)}"><div class="quiz-in"><div class="quiz-top"><div><div class="t">${esc(qz.title)}</div><div class="p">${z.preview?"Preview":esc(st?st.name:"")} · question ${Math.min(z.i+1,qz.qs.length)} of ${qz.qs.length}</div></div><button class="x" data-qclose aria-label="Close">×</button></div><div class="steps">${steps}</div>${body}</div></div>`;
+}
+async function saveAttempt(st,qz,sc,p,missed){
+  const z=S.quiz;z.saving=true;
+  const ok=await write(async db=>{
+    await db.collection("attempts").add({student:st.id,quiz:z.id,skill:qz.skill,score:sc,total:qz.qs.length,pct:p,missed,at:new Date().toISOString()});
+    let tid=z.taskId;if(!tid){const t=tasksFor(st.id).find(t=>!t.done&&t.ref===z.id);tid=t&&t.id}
+    if(tid)await db.doc("tasks/"+tid).update({done:true,doneAt:new Date().toISOString()});
+    await act(db,"student",st.id,"check",`Took ${qz.title}: ${p}%`);
+  });
+  if(S.quiz===z){z.saving=false;z.saved=ok;z.preview=!ok;renderQuiz()}
+}
+
+/* ---------------- render + events ---------------- */
+function render(){
+  ["teacher","student","library"].forEach(v=>{$("#"+v).hidden=S.view!==v;$("#v-"+v).setAttribute("aria-pressed",S.view===v)});
+  if(S.view==="teacher")renderTeacher();else if(S.view==="student")renderStudent();else renderLibrary();
+  if(S.quiz||S.guide)return; // keep the quiz or guide on screen while data updates arrive
+  const notesEl=document.getElementById("notes");const focused=notesEl&&document.activeElement===notesEl;
+  if(!focused)renderDrawer();
+}
+function setView(v){S.view=v;try{history.replaceState(null,"","#"+v)}catch(e){}try{localStorage.setItem("ll-view",v)}catch(e){}window.scrollTo(0,0);render()}
+document.addEventListener("click",async e=>{
+  const t=e.target.closest("[data-view],[data-open],[data-close],[data-lib],[data-skill],[data-start],[data-pick],[data-next],[data-qclose],[data-done],[data-add],[data-copy],[data-preview],[data-guide],[data-gclose],[data-assign],[data-libcourse]");if(!t)return;
+  const d=t.dataset;
+  if(d.view){setView(d.view)}
+  else if(d.open){S.open=d.open;renderDrawer()}
+  else if("close" in d){S.open=null;renderDrawer()}
+  else if(d.lib){S.open=null;renderDrawer();S.libSkill=d.lib;setView("library")}
+  else if(d.skill){S.libSkill=d.skill;renderLibrary()}
+  else if(d.preview){startQuiz(d.preview,null,true)}
+  else if(d.libcourse){S.libCourse=d.libcourse;renderLibrary()}
+  else if(d.guide){e.preventDefault();S.guide=d.guide;renderGuide()}
+  else if("gclose" in d){S.guide=null;$("#overlay").innerHTML="";render()}
+  else if(d.assign){const tp=ALLTOPICS.find(x=>x.key===d.assign),ref=tp.key,wk=curWeek();const todo=S.students.filter(st=>!S.tasks.some(x=>x.student===st.id&&x.ref===ref));
+    if(!todo.length){toast("Everyone already has this practice");return}
+    await write(async db=>{for(const st of todo)await db.collection("tasks").add({student:st.id,skill:"A",kind:"student",type:"quiz",ref,title:tp.name+" practice",minutes:10,week:wk,done:false,doneAt:null});await act(db,"teacher","class","assign",`Assigned “${tp.name} practice” to ${todo.length} students`)},"Practice assigned to "+todo.length+" students")}
+  else if(d.start){e.preventDefault();S.guide=null;startQuiz(d.start,d.taskid,!!d.previewMode)}
+  else if(d.pick!=null&&S.quiz){if(S.quiz.picked!=null)return;S.quiz.picked=+d.pick;S.quiz.results.push(!!S.quiz.order[S.quiz.i][+d.pick].ok);renderQuiz()}
+  else if("next" in d&&S.quiz){S.quiz.i++;S.quiz.picked=null;renderQuiz()}
+  else if("qclose" in d){S.quiz=null;$("#overlay").innerHTML="";render()}
+  else if(d.done){const tk=S.tasks.find(x=>x.id===d.done);await write(async db=>{await db.doc("tasks/"+d.done).update({done:true,doneAt:new Date().toISOString()});if(tk)await act(db,"student",tk.student,"task",`Finished “${tk.title}”`)},"Marked done")}
+  else if(d.add){const v=$("#addsel").value,wk=+$("#addwk").value;if(!v){toast("Pick a task first");return}const [kind,k,ref]=v.split(":");const sk=SKILLS[k];
+    const doc=kind==="q"?{student:d.add,skill:k,kind:"student",type:"quiz",ref,title:QUIZZES[ref].title,minutes:QUIZZES[ref].qs.length>5?10:5,week:wk,done:false,doneAt:null}:{student:d.add,skill:k,kind:"student",type:"todo",ref:"",title:sk.todos[+ref],minutes:15,week:wk,done:false,doneAt:null};
+    await write(async db=>{await db.collection("tasks").add(doc);await act(db,"teacher",d.add,"add",`Added “${doc.title}” for week ${wk}`)},"Task added")}
+  else if(d.copy){const ta=document.getElementById(d.copy);try{await navigator.clipboard.writeText(ta.value);toast("Copied")}catch(err){ta.focus();ta.select();toast("Selected. Copy with your keyboard.")}if(S.open&&S.db)act(S.db,"teacher",S.open,"parent","Copied the parent update")}
+});
+document.addEventListener("change",async e=>{
+  const t=e.target;
+  if(t.dataset.task){const id=t.dataset.task,tk=S.tasks.find(x=>x.id===id);await write(async db=>{await db.doc("tasks/"+id).update({done:t.checked,doneAt:t.checked?new Date().toISOString():null});if(tk)await act(db,"teacher",tk.student,"tick",`${t.checked?"Ticked":"Unticked"} “${tk.title}”`)})}
+  else if(t.dataset.status){t.dataset.v=t.value;const sid=t.dataset.status,lbl=(STATUS.find(s=>s[0]===t.value)||[,""])[1];await write(async db=>{await db.doc("students/"+sid).update({status:t.value});await act(db,"teacher",sid,"status",`Set status to ${lbl}`)},"Status saved")}
+  else if(t.id==="as"){S.as=t.value;renderStudent()}
+  else if(t.id==="coursesel"){const v=t.value;await write(async db=>{await db.doc("program/settings").update({course:v,topic:null});await act(db,"teacher","class","course",`Switched math course to ${COURSES[v].label}`)},"Course saved")}
+  else if(t.id==="topicsel"){const v=t.value,tp=ALLTOPICS.find(x=>x.key===v);await write(async db=>{await db.doc("program/settings").update({topic:v||null});await act(db,"teacher","class","topic",tp?`Set math topic to ${tp.name}`:"Set math topic to follow district pacing")},"Math topic saved")}
+});
+document.addEventListener("focusout",async e=>{const t=e.target;if(t.dataset&&t.dataset.notes){const st=S.students.find(s=>s.id===t.dataset.notes);if(st&&(st.notes||"")!==t.value)await write(async db=>{await db.doc("students/"+st.id).update({notes:t.value});await act(db,"teacher",st.id,"notes","Updated notes: “"+t.value.slice(0,60)+(t.value.length>60?"…":"")+"”")},"Notes saved")}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){if(S.guide&&!S.quiz){S.guide=null;$("#overlay").innerHTML="";render()}else if(S.quiz){S.quiz=null;$("#overlay").innerHTML="";render()}else if(S.open){S.open=null;renderDrawer()}}});
+(function boot(){let v=(location.hash||"").slice(1);if(!["teacher","student","library"].includes(v)){try{v=localStorage.getItem("ll-view")||"teacher"}catch(e){v="teacher"}}if(!["teacher","student","library"].includes(v))v="teacher";S.view=v;render();initDb()})();
+</script>
+
+</body></html>

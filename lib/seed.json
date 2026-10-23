@@ -1,0 +1,445 @@
+{
+ "students": {
+  "ava": {
+   "name": "Ava Fischer",
+   "focus": [
+    "E",
+    "A",
+    "B"
+   ],
+   "summary": "Low in every subject (53–58%) and 3 missing assignments. Look beyond academics first.",
+   "baseline": {
+    "Algebra I": 53,
+    "Science": 55,
+    "English 8": 58,
+    "U.S. History": 54
+   },
+   "target": "65%+ in every subject, 0 missing work",
+   "helper": "Olivia Johnson",
+   "status": "not-started",
+   "notes": ""
+  },
+  "mateo": {
+   "name": "Mateo Diaz",
+   "focus": [
+    "C",
+    "E",
+    "D",
+    "A"
+   ],
+   "summary": "Lowest in reading-heavy classes (English 63%, U.S. History 65%); 2 missing homeworks.",
+   "baseline": {
+    "Algebra I": 72,
+    "Science": 70,
+    "English 8": 63,
+    "U.S. History": 65
+   },
+   "target": "72%+ in English and U.S. History, 0 missing work",
+   "helper": "Zoe Harris",
+   "status": "not-started",
+   "notes": ""
+  },
+  "kenji": {
+   "name": "Kenji Ito",
+   "focus": [
+    "B",
+    "A"
+   ],
+   "summary": "STEM gap: Algebra I 68%, Science 61%. English is strong (82%).",
+   "baseline": {
+    "Algebra I": 68,
+    "Science": 61,
+    "English 8": 82,
+    "U.S. History": 76
+   },
+   "target": "75%+ in Science and Algebra I",
+   "helper": "Lily Chen",
+   "status": "not-started",
+   "notes": ""
+  },
+  "ethan": {
+   "name": "Ethan Brooks",
+   "focus": [
+    "A"
+   ],
+   "summary": "Algebra I only (64%); 80%+ in other classes.",
+   "baseline": {
+    "Algebra I": 64,
+    "Science": 80,
+    "English 8": 87,
+    "U.S. History": 83
+   },
+   "target": "Algebra I 75%+, equations check 80%+",
+   "helper": "Noah Evans",
+   "status": "not-started",
+   "notes": ""
+  },
+  "zoe": {
+   "name": "Zoe Harris",
+   "focus": [
+    "A"
+   ],
+   "summary": "One skill: 50% on multi-step equations, 90% on literal equations and inequalities.",
+   "baseline": {
+    "Algebra I": 78,
+    "Science": 80,
+    "English 8": 95,
+    "U.S. History": 92
+   },
+   "target": "Equations check 80%+ by week 2",
+   "helper": "",
+   "status": "not-started",
+   "notes": ""
+  }
+ },
+ "tasks": {
+  "ava-1": {
+   "student": "ava",
+   "skill": "E",
+   "kind": "teacher",
+   "type": "todo",
+   "ref": "",
+   "title": "Private check-in: what's getting in the way?",
+   "minutes": 10,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ava-2": {
+   "student": "ava",
+   "skill": "E",
+   "kind": "teacher",
+   "type": "todo",
+   "ref": "",
+   "title": "Call home: agree dates for the 3 missing items",
+   "minutes": 10,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ava-3": {
+   "student": "ava",
+   "skill": "E",
+   "kind": "student",
+   "type": "todo",
+   "ref": "",
+   "title": "Turn in Algebra project: Budget Equations",
+   "minutes": 45,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ava-4": {
+   "student": "ava",
+   "skill": "E",
+   "kind": "student",
+   "type": "todo",
+   "ref": "",
+   "title": "Turn in English: Commas & Clauses",
+   "minutes": 20,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ava-5": {
+   "student": "ava",
+   "skill": "A",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "equations-check",
+   "title": "Equations check",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ava-6": {
+   "student": "ava",
+   "skill": "B",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "science-check",
+   "title": "Science check",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ava-7": {
+   "student": "ava",
+   "skill": "E",
+   "kind": "student",
+   "type": "todo",
+   "ref": "",
+   "title": "Turn in Science project: Egg Drop Design",
+   "minutes": 45,
+   "week": 2,
+   "done": false,
+   "doneAt": null
+  },
+  "ava-8": {
+   "student": "ava",
+   "skill": "A",
+   "kind": "student",
+   "type": "practice",
+   "ref": "equations-practice",
+   "title": "Equations practice set",
+   "minutes": 10,
+   "week": 2,
+   "done": false,
+   "doneAt": null
+  },
+  "ava-9": {
+   "student": "ava",
+   "skill": "E",
+   "kind": "teacher",
+   "type": "todo",
+   "ref": "",
+   "title": "Week 3 review: refer to I&RS if concerns continue",
+   "minutes": 10,
+   "week": 3,
+   "done": false,
+   "doneAt": null
+  },
+  "mateo-1": {
+   "student": "mateo",
+   "skill": "E",
+   "kind": "teacher",
+   "type": "todo",
+   "ref": "",
+   "title": "Email home: 2 missing items + 20-minute reading goal",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "mateo-2": {
+   "student": "mateo",
+   "skill": "C",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "reading-check",
+   "title": "Reading check",
+   "minutes": 10,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "mateo-3": {
+   "student": "mateo",
+   "skill": "E",
+   "kind": "student",
+   "type": "todo",
+   "ref": "",
+   "title": "Turn in Algebra: Inequalities homework",
+   "minutes": 20,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "mateo-4": {
+   "student": "mateo",
+   "skill": "E",
+   "kind": "student",
+   "type": "todo",
+   "ref": "",
+   "title": "Turn in U.S. History: Revolution timeline",
+   "minutes": 20,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "mateo-5": {
+   "student": "mateo",
+   "skill": "A",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "equations-check",
+   "title": "Equations check",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "mateo-6": {
+   "student": "mateo",
+   "skill": "C",
+   "kind": "student",
+   "type": "practice",
+   "ref": "writing-practice",
+   "title": "Writing practice set",
+   "minutes": 10,
+   "week": 2,
+   "done": false,
+   "doneAt": null
+  },
+  "mateo-7": {
+   "student": "mateo",
+   "skill": "D",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "history-check",
+   "title": "Primary sources check",
+   "minutes": 5,
+   "week": 2,
+   "done": false,
+   "doneAt": null
+  },
+  "kenji-1": {
+   "student": "kenji",
+   "skill": "B",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "science-check",
+   "title": "Science check",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "kenji-2": {
+   "student": "kenji",
+   "skill": "A",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "equations-check",
+   "title": "Equations check",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "kenji-3": {
+   "student": "kenji",
+   "skill": "B",
+   "kind": "teacher",
+   "type": "todo",
+   "ref": "",
+   "title": "Pair with Lily Chen for the next lab write-up",
+   "minutes": 5,
+   "week": 2,
+   "done": false,
+   "doneAt": null
+  },
+  "kenji-4": {
+   "student": "kenji",
+   "skill": "B",
+   "kind": "student",
+   "type": "practice",
+   "ref": "science-practice",
+   "title": "Science practice set",
+   "minutes": 10,
+   "week": 2,
+   "done": false,
+   "doneAt": null
+  },
+  "kenji-5": {
+   "student": "kenji",
+   "skill": "A",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "inequalities-check",
+   "title": "Literal equations & inequalities check",
+   "minutes": 5,
+   "week": 3,
+   "done": false,
+   "doneAt": null
+  },
+  "ethan-1": {
+   "student": "ethan",
+   "skill": "A",
+   "kind": "teacher",
+   "type": "todo",
+   "ref": "",
+   "title": "Note home: the concern is Algebra I only",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ethan-2": {
+   "student": "ethan",
+   "skill": "A",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "equations-check",
+   "title": "Equations check",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ethan-3": {
+   "student": "ethan",
+   "skill": "A",
+   "kind": "student",
+   "type": "todo",
+   "ref": "",
+   "title": "Khan Academy: multi-step equations — 15 min",
+   "minutes": 15,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "ethan-4": {
+   "student": "ethan",
+   "skill": "A",
+   "kind": "student",
+   "type": "practice",
+   "ref": "equations-practice",
+   "title": "Equations practice set",
+   "minutes": 10,
+   "week": 2,
+   "done": false,
+   "doneAt": null
+  },
+  "ethan-5": {
+   "student": "ethan",
+   "skill": "A",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "inequalities-check",
+   "title": "Literal equations & inequalities check",
+   "minutes": 5,
+   "week": 3,
+   "done": false,
+   "doneAt": null
+  },
+  "zoe-1": {
+   "student": "zoe",
+   "skill": "A",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "equations-check",
+   "title": "Equations check",
+   "minutes": 5,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "zoe-2": {
+   "student": "zoe",
+   "skill": "A",
+   "kind": "student",
+   "type": "practice",
+   "ref": "equations-practice",
+   "title": "Equations practice set",
+   "minutes": 10,
+   "week": 1,
+   "done": false,
+   "doneAt": null
+  },
+  "zoe-3": {
+   "student": "zoe",
+   "skill": "A",
+   "kind": "student",
+   "type": "quiz",
+   "ref": "equations-check",
+   "title": "Equations re-check (week 2)",
+   "minutes": 5,
+   "week": 2,
+   "done": false,
+   "doneAt": null
+  }
+ }
+}

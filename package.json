@@ -1,0 +1,13 @@
+{
+  "name": "learner-lens-web",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build:page": "python3 build.py src/app.html .",
+    "dev": "LL_MEMORY=1 node dev-server.mjs"
+  },
+  "dependencies": {
+    "@upstash/redis": "1.38.4"
+  }
+}
