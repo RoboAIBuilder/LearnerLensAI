@@ -80,8 +80,10 @@
   // Resolve null if storage isn't reachable, so the page shows its "tracking is off" notice.
   let probe = null;
   async function available() {
-    if (!probe) probe = fetch("/api/db?c=program", { cache: "no-store" }).then((r) => r.ok).catch(() => false);
+    if (!probe) probe = fetch("/api/db?c=program", { cache: "no-store" }).then((r) => r.ok).catch(() => { window.__LL_OFFLINE = true; return false; });
     return probe;
   }
+  // Opened offline? Reload once the connection returns so plans and saving come back.
+  window.addEventListener("online", () => { if (window.__LL_OFFLINE) location.reload(); });
   window.claude = { use: async (name) => (name === "db" && (await available()) ? db : null) };
 })();

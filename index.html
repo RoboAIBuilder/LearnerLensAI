@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style><script>/* Learner Lens storage adapter for Vercel.
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="description" content="See which students need help with which skills, and give each one the right practice."><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#2C59CC"><link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Learner Lens"><meta name="apple-mobile-web-app-status-bar-style" content="default"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style><script>/* Learner Lens storage adapter for Vercel.
    On claude.ai the page gets a database from the platform (window.claude.use("db")).
    Here the same interface is provided on top of /api/db, refreshed by polling. */
 (function () {
@@ -80,9 +80,11 @@
   // Resolve null if storage isn't reachable, so the page shows its "tracking is off" notice.
   let probe = null;
   async function available() {
-    if (!probe) probe = fetch("/api/db?c=program", { cache: "no-store" }).then((r) => r.ok).catch(() => false);
+    if (!probe) probe = fetch("/api/db?c=program", { cache: "no-store" }).then((r) => r.ok).catch(() => { window.__LL_OFFLINE = true; return false; });
     return probe;
   }
+  // Opened offline? Reload once the connection returns so plans and saving come back.
+  window.addEventListener("online", () => { if (window.__LL_OFFLINE) location.reload(); });
   window.claude = { use: async (name) => (name === "db" && (await available()) ? db : null) };
 })();
 </script></head><body>
@@ -1167,7 +1169,7 @@ function renderSince(){
   <div class="since-b"><div><h4>What you updated</h4><ul>${ls.items.map(li).join("")}</ul></div>
   <div><h4>New from students <span class="cnt">${nw.length}</span></h4>${nw.length?`<ul>${nw.slice(0,5).map(li).join("")}</ul>${nw.length>5?`<div class="more">and ${nw.length-5} more</div>`:""}`:'<div class="more">No student activity yet.</div>'}</div></div></div>`;
 }
-function note(){const n=$("#dbnote");if(S.dbState==="off"){n.hidden=false;n.innerHTML=window.__LL_HOSTED?"<b>Progress tracking is off.</b> The database isn't connected yet. In Vercel, add Storage → Upstash for Redis to this project, then redeploy. The toolkit and every check still work here.":"<b>Progress tracking is off in this view.</b> Sign in on claude.ai to see plans and save progress. The toolkit and every check still work here.";}else n.hidden=true}
+function note(){const n=$("#dbnote");if(S.dbState==="off"){n.hidden=false;n.innerHTML=window.__LL_OFFLINE?"<b>You're offline.</b> Plans and progress need a connection; they'll come back when you reconnect. The toolkit, study guides and practice still work.":window.__LL_HOSTED?"<b>Progress tracking is off.</b> The database isn't connected yet. In Vercel, add Storage → Upstash for Redis to this project, then redeploy. The toolkit and every check still work here.":"<b>Progress tracking is off in this view.</b> Sign in on claude.ai to see plans and save progress. The toolkit and every check still work here.";}else n.hidden=true}
 async function write(fn,okMsg){if(!S.db){toast("Sign in to save progress");return false}try{await fn(S.db);if(okMsg)toast(okMsg);return true}catch(e){toast(e&&e.code==="invalid_argument"?"You can view this plan but not change it":"Couldn't save. Try again.");return false}}
 
 /* ---------------- teacher view ---------------- */
@@ -1353,4 +1355,61 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"){if(S.guide&&!S.quiz
 (function boot(){let v=(location.hash||"").slice(1);if(!["teacher","student","library"].includes(v)){try{v=localStorage.getItem("ll-view")||"teacher"}catch(e){v="teacher"}}if(!["teacher","student","library"].includes(v))v="teacher";S.view=v;render();initDb()})();
 </script>
 
+<script>/* Learner Lens install support: registers the service worker and shows an "Install app" button. */
+(function () {
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+  }
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  if (standalone) return;
+
+  let deferred = null;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  function dismissed() { try { return localStorage.getItem("ll-install-dismissed") === "1"; } catch (e) { return false; } }
+  function remember() { try { localStorage.setItem("ll-install-dismissed", "1"); } catch (e) {} }
+
+  function show(text, onClick) {
+    if (document.getElementById("ll-install")) return;
+    const bar = document.createElement("div");
+    bar.id = "ll-install";
+    bar.setAttribute("role", "region");
+    bar.setAttribute("aria-label", "Install Learner Lens");
+    bar.innerHTML =
+      '<img src="/icons/icon-192.png" alt="" width="36" height="36">' +
+      '<span class="t">' + text + "</span>" +
+      (onClick ? '<button type="button" class="go">Install</button>' : "") +
+      '<button type="button" class="x" aria-label="Dismiss">×</button>';
+    const st = document.createElement("style");
+    st.textContent =
+      "#ll-install{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 16px);z-index:50;display:flex;align-items:center;gap:10px;" +
+      "background:var(--surface,#fff);color:var(--ink,#172033);border:1px solid var(--line,#DCE1EA);border-radius:14px;padding:10px 12px;box-shadow:0 8px 24px rgba(23,32,51,.18);" +
+      "width:min(440px,calc(100% - 32px));box-sizing:border-box;font:600 14px var(--f-body,system-ui)}" +
+      "#ll-install img{border-radius:8px;flex:none}#ll-install .t{flex:1;min-width:0}" +
+      "#ll-install .go{border:0;background:var(--accent,#2C59CC);color:var(--accent-ink,#fff);font:inherit;padding:8px 14px;border-radius:9px;cursor:pointer}" +
+      "#ll-install .x{border:0;background:transparent;color:var(--muted,#5A6377);font-size:20px;line-height:1;padding:4px 6px;cursor:pointer}";
+    document.head.appendChild(st);
+    document.body.appendChild(bar);
+    bar.querySelector(".x").onclick = () => { remember(); bar.remove(); };
+    if (onClick) bar.querySelector(".go").onclick = onClick;
+  }
+
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferred = e;
+    if (dismissed()) return;
+    show("Install Learner Lens for one-tap access, even offline.", async () => {
+      document.getElementById("ll-install")?.remove();
+      deferred.prompt();
+      await deferred.userChoice.catch(() => {});
+      deferred = null;
+    });
+  });
+  window.addEventListener("appinstalled", () => { document.getElementById("ll-install")?.remove(); remember(); });
+
+  if (ios && !dismissed()) {
+    window.addEventListener("load", () => setTimeout(() => show("Install: tap Share, then “Add to Home Screen”.", null), 1500));
+  }
+})();
+</script>
 </body></html>
