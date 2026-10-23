@@ -3,6 +3,7 @@
    Here the same interface is provided on top of /api/db, refreshed by polling. */
 (function () {
   if (window.claude && window.claude.use) return;
+  window.__LL_HOSTED = true;
   const POLL_MS = 5000;
   const cache = new Map();          // collection -> { docs: {id: data}, listeners: Set, loaded: bool }
   let seedTried = false;

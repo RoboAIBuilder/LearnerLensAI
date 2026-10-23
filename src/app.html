@@ -1079,7 +1079,7 @@ function renderSince(){
   <div class="since-b"><div><h4>What you updated</h4><ul>${ls.items.map(li).join("")}</ul></div>
   <div><h4>New from students <span class="cnt">${nw.length}</span></h4>${nw.length?`<ul>${nw.slice(0,5).map(li).join("")}</ul>${nw.length>5?`<div class="more">and ${nw.length-5} more</div>`:""}`:'<div class="more">No student activity yet.</div>'}</div></div></div>`;
 }
-function note(){const n=$("#dbnote");if(S.dbState==="off"){n.hidden=false;n.innerHTML="<b>Progress tracking is off in this view.</b> Sign in on claude.ai to see plans and save progress. The toolkit and every check still work here.";}else n.hidden=true}
+function note(){const n=$("#dbnote");if(S.dbState==="off"){n.hidden=false;n.innerHTML=window.__LL_HOSTED?"<b>Progress tracking is off.</b> The database isn't connected yet. In Vercel, add Storage → Upstash for Redis to this project, then redeploy. The toolkit and every check still work here.":"<b>Progress tracking is off in this view.</b> Sign in on claude.ai to see plans and save progress. The toolkit and every check still work here.";}else n.hidden=true}
 async function write(fn,okMsg){if(!S.db){toast("Sign in to save progress");return false}try{await fn(S.db);if(okMsg)toast(okMsg);return true}catch(e){toast(e&&e.code==="invalid_argument"?"You can view this plan but not change it":"Couldn't save. Try again.");return false}}
 
 /* ---------------- teacher view ---------------- */
